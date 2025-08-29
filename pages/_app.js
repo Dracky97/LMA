@@ -1,5 +1,15 @@
-import "@/styles/globals.css";
+import '../styles/globals.css';
+import { AuthProvider } from '../context/AuthContext';
+import { DarkModeProvider } from '../context/DarkModeContext';
 
-export default function App({ Component, pageProps }) {
-  return <Component {...pageProps} />;
+function MyApp({ Component, pageProps }) {
+  return (
+    <DarkModeProvider>
+      <AuthProvider>
+        <Component {...pageProps} />
+      </AuthProvider>
+    </DarkModeProvider>
+  );
 }
+
+export default MyApp;

@@ -5,6 +5,7 @@ import { app } from '../../lib/firebase-client';
 import ManagerRequestsTable from '../ManagerRequestsTable';
 import LeaveHistoryTable from '../LeaveHistoryTable';
 import MyLeaveSection from '../MyLeaveSection';
+import { LEAVE_TYPE_MAP, validateLeaveType } from '../../lib/leaveTypes';
 
 const db = getFirestore(app);
 
@@ -42,16 +43,19 @@ export default function DepartmentManagerDashboard() {
         };
     }, [userData?.uid]);
 
-    const handleApproval = async (requestId, newStatus) => {
+    const handleApproval = async (requestId, newStatus, rejectionReason = '') => {
         try {
             // Clear any previous messages
             setMessage(null);
             
             const requestRef = doc(db, "leaveRequests", requestId);
-            await updateDoc(requestRef, {
+            const updateData = {
                 status: newStatus,
-                approvedBy: userData.name
-            });
+                approvedBy: userData.name,
+                rejectionReason: newStatus === 'Rejected' ? (rejectionReason?.trim() || '') : ''
+            };
+            
+            await updateDoc(requestRef, updateData);
 
             if (newStatus === 'Approved') {
                 const requestDoc = await getDoc(requestRef);
@@ -66,11 +70,29 @@ export default function DepartmentManagerDashboard() {
                 const userDoc = await getDoc(userRef);
                 if (userDoc.exists()) {
                     const currentData = userDoc.data();
-                    const leaveType = request.type.toLowerCase();
-                    
-                    // Validate leave type exists in user's balance
-                    if (!currentData.leaveBalance.hasOwnProperty(leaveType)) {
-                        throw new Error(`Invalid leave type: ${request.type}`);
+                    // Convert leave type name to match the balance structure
+                    const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(' ', '');
+
+                    // Validate leave type using shared function
+                    validateLeaveType(leaveType, currentData.gender);
+
+                    // Debug: Log available leave balance keys
+                    console.log('User leave balance keys:', Object.keys(currentData.leaveBalance || {}));
+                    console.log('Looking for leave type:', leaveType);
+                    console.log('Request type:', request.type);
+
+                    // Validate leave type exists in user's balance, if not initialize it to 0
+                    if (!currentData.leaveBalance || !currentData.leaveBalance.hasOwnProperty(leaveType)) {
+                        // Initialize missing leave type to 0
+                        if (!currentData.leaveBalance) {
+                            currentData.leaveBalance = {};
+                        }
+                        currentData.leaveBalance[leaveType] = 0;
+                        
+                        // Update user document with the missing leave type
+                        await updateDoc(userRef, {
+                            [`leaveBalance.${leaveType}`]: 0
+                        });
                     }
                     
                     const currentBalance = currentData.leaveBalance[leaveType];
@@ -82,7 +104,22 @@ export default function DepartmentManagerDashboard() {
                         throw new Error('Invalid date range');
                     }
                     
-                    const duration = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
+                    // Use leaveUnits if available (for half-day support), otherwise calculate from dates
+                    let duration;
+                    if (request.leaveUnits !== undefined && request.leaveUnits > 0) {
+                        duration = request.leaveUnits;
+                    } else {
+                        // Fallback to date calculation for older requests
+                        duration = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
+                    }
+                    
+                    console.log('Deducting leave:', {
+                        leaveType,
+                        duration,
+                        leaveUnits: request.leaveUnits,
+                        currentBalance,
+                        isPartialDay: request.isPartialDay
+                    });
                     
                     // Check if user has enough leave balance
                     if (currentBalance < duration) {

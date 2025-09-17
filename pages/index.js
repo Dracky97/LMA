@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { useAuth } from '../context/AuthContext';
 import AuthPage from '../components/AuthPage';
@@ -6,7 +6,6 @@ import AuthPage from '../components/AuthPage';
 export default function HomePage() {
     const { user, loading } = useAuth();
     const router = useRouter();
-    const [view, setView] = useState('login');
 
     useEffect(() => {
         if (!loading && user) {
@@ -20,19 +19,10 @@ export default function HomePage() {
 
     return (
         <div className="min-h-screen bg-background flex flex-col justify-center items-center p-4">
-            {view === 'login' ? (
-                <AuthPage
-                    title="Login to Your Account"
-                    isSignup={false}
-                    onSwitch={() => setView('signup')}
-                />
-            ) : (
-                <AuthPage
-                    title="Create a New Account"
-                    isSignup={true}
-                    onSwitch={() => setView('login')}
-                />
-            )}
+            <AuthPage
+                title="Login to Your Account"
+                isSignup={false}
+            />
         </div>
     );
 }

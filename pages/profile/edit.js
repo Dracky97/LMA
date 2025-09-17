@@ -2,15 +2,21 @@ import React, { useState, useEffect } from 'react';
 import DashboardLayout from '../../components/DashboardLayout';
 import { useAuth } from '../../context/AuthContext';
 import { getFirestore, doc, updateDoc } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { app } from '../../lib/firebase-client';
 import { useRouter } from 'next/router';
 
 const db = getFirestore(app);
+const storage = getStorage(app);
 
 export default function EditProfilePage() {
     const { userData } = useAuth();
     const router = useRouter();
     const [formData, setFormData] = useState(null);
+    const [profileImage, setProfileImage] = useState(null);
+    const [coverImage, setCoverImage] = useState(null);
+    const [profileImagePreview, setProfileImagePreview] = useState(null);
+    const [coverImagePreview, setCoverImagePreview] = useState(null);
 
     useEffect(() => {
         if (userData) {
@@ -20,8 +26,18 @@ export default function EditProfilePage() {
                 personalDetails: userData.personalDetails || { phone: '', address: '', dob: '' },
                 socialMedia: userData.socialMedia || { linkedin: '', twitter: '' },
                 education: userData.education || [],
-                qualifications: userData.qualifications || []
+                qualifications: userData.qualifications || [],
+                profileImageUrl: userData.profileImageUrl || '',
+                coverImageUrl: userData.coverImageUrl || ''
             });
+            
+            // Set previews if images already exist
+            if (userData.profileImageUrl) {
+                setProfileImagePreview(userData.profileImageUrl);
+            }
+            if (userData.coverImageUrl) {
+                setCoverImagePreview(userData.coverImageUrl);
+            }
         }
     }, [userData]);
 
@@ -56,6 +72,43 @@ export default function EditProfilePage() {
         }
     };
 
+    const handleImageChange = (e, type) => {
+        const file = e.target.files[0];
+        if (file) {
+            if (type === 'profile') {
+                setProfileImage(file);
+                // Create preview
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    setProfileImagePreview(reader.result);
+                };
+                reader.readAsDataURL(file);
+            } else if (type === 'cover') {
+                setCoverImage(file);
+                // Create preview
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    setCoverImagePreview(reader.result);
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+    };
+
+    const uploadImage = async (file, path) => {
+        if (!file) return null;
+        
+        try {
+            const imageRef = ref(storage, path);
+            await uploadBytes(imageRef, file);
+            const url = await getDownloadURL(imageRef);
+            return url;
+        } catch (error) {
+            console.error("Error uploading image:", error);
+            return null;
+        }
+    };
+
     const addEducation = () => {
         setFormData(prev => ({
             ...prev,
@@ -87,9 +140,35 @@ export default function EditProfilePage() {
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (!userData) return;
-        const userDocRef = doc(db, 'users', userData.uid);
+        
         try {
-            await updateDoc(userDocRef, formData);
+            // Upload images if they exist
+            let profileImageUrl = formData.profileImageUrl;
+            let coverImageUrl = formData.coverImageUrl;
+            
+            if (profileImage) {
+                profileImageUrl = await uploadImage(
+                    profileImage,
+                    `profile-images/${userData.uid}/profile-${Date.now()}.jpg`
+                );
+            }
+            
+            if (coverImage) {
+                coverImageUrl = await uploadImage(
+                    coverImage,
+                    `profile-images/${userData.uid}/cover-${Date.now()}.jpg`
+                );
+            }
+            
+            // Update form data with image URLs
+            const updatedFormData = {
+                ...formData,
+                profileImageUrl: profileImageUrl || formData.profileImageUrl,
+                coverImageUrl: coverImageUrl || formData.coverImageUrl
+            };
+            
+            const userDocRef = doc(db, 'users', userData.uid);
+            await updateDoc(userDocRef, updatedFormData);
             router.push(`/profile/${userData.uid}`);
         } catch (error) {
             console.error("Error updating profile:", error);
@@ -106,6 +185,78 @@ export default function EditProfilePage() {
                 </div>
                 
                 <form onSubmit={handleSubmit} className="p-6 space-y-8">
+                    {/* Profile Images Section */}
+                    <div className="bg-muted p-6 rounded-lg">
+                        <h2 className="text-xl font-semibold text-slate-200 mb-4">Profile Images</h2>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {/* Profile Picture */}
+                            <div>
+                                <label className="block text-sm font-medium text-slate-300 mb-1">Profile Picture</label>
+                                <div className="flex items-center space-x-4">
+                                    <div className="bg-gray-200 border-2 border-dashed border-gray-400 rounded-full w-16 h-16 flex items-center justify-center overflow-hidden">
+                                        {profileImagePreview ? (
+                                            <img
+                                                src={profileImagePreview}
+                                                alt="Profile Preview"
+                                                className="w-full h-full object-cover"
+                                            />
+                                        ) : (
+                                            <span className="text-gray-500">No Image</span>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={(e) => handleImageChange(e, 'profile')}
+                                            className="block w-full text-sm text-slate-400
+                                                file:mr-4 file:py-2 file:px-4
+                                                file:rounded-md file:border-0
+                                                file:text-sm file:font-medium
+                                                file:bg-blue-600 file:text-white
+                                                hover:file:bg-blue-700
+                                                file:cursor-pointer"
+                                        />
+                                        <p className="text-xs text-slate-500 mt-1">JPG, PNG, GIF up to 5MB</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            {/* Cover Photo */}
+                            <div>
+                                <label className="block text-sm font-medium text-slate-300 mb-1">Cover Photo</label>
+                                <div className="flex items-center space-x-4">
+                                    <div className="bg-gray-200 border-2 border-dashed border-gray-400 rounded w-32 h-16 flex items-center justify-center overflow-hidden">
+                                        {coverImagePreview ? (
+                                            <img
+                                                src={coverImagePreview}
+                                                alt="Cover Preview"
+                                                className="w-full h-full object-cover"
+                                            />
+                                        ) : (
+                                            <span className="text-gray-500">No Image</span>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={(e) => handleImageChange(e, 'cover')}
+                                            className="block w-full text-sm text-slate-400
+                                                file:mr-4 file:py-2 file:px-4
+                                                file:rounded-md file:border-0
+                                                file:text-sm file:font-medium
+                                                file:bg-blue-600 file:text-white
+                                                hover:file:bg-blue-700
+                                                file:cursor-pointer"
+                                        />
+                                        <p className="text-xs text-slate-500 mt-1">JPG, PNG, GIF up to 5MB</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
                     {/* Basic Information Section */}
                     <div className="bg-muted p-6 rounded-lg">
                         <h2 className="text-xl font-semibold text-slate-200 mb-4">Basic Information</h2>
@@ -142,6 +293,20 @@ export default function EditProfilePage() {
                                     onChange={(e) => handleChange(e, 'personalDetails')}
                                     className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 />
+                            </div>
+                            
+                            <div>
+                                <label className="block text-sm font-medium text-slate-300 mb-1">Gender</label>
+                                <select
+                                    name="gender"
+                                    value={formData.gender || ''}
+                                    onChange={(e) => setFormData({...formData, gender: e.target.value})}
+                                    className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value="">Select Gender</option>
+                                    <option value="male">Male</option>
+                                    <option value="female">Female</option>
+                                </select>
                             </div>
                             
                             <div>

@@ -41,14 +41,33 @@ export default function ProfilePage() {
     return (
         <DashboardLayout>
             {/* Profile Header with Cover Photo */}
-            <div className="relative bg-gradient-to-r from-blue-900 to-indigo-800 rounded-t-lg h-48">
+            <div className="relative rounded-t-lg h-48">
+                {/* Cover Photo */}
+                {profileData.coverImageUrl ? (
+                    <img
+                        src={profileData.coverImageUrl}
+                        alt="Cover"
+                        className="w-full h-full object-cover rounded-t-lg"
+                    />
+                ) : (
+                    <div className="bg-gradient-to-r from-blue-900 to-indigo-800 w-full h-full rounded-t-lg"></div>
+                )}
+                
                 {/* Profile Picture */}
                 <div className="absolute -bottom-16 left-8">
-                    <div className="bg-gray-200 border-4 border-card rounded-full w-32 h-32 flex items-center justify-center">
-                        <span className="text-4xl font-bold text-gray-600">
-                            {profileData.name?.charAt(0) || 'U'}
-                        </span>
-                    </div>
+                    {profileData.profileImageUrl ? (
+                        <img
+                            src={profileData.profileImageUrl}
+                            alt="Profile"
+                            className="border-4 border-card rounded-full w-32 h-32 object-cover"
+                        />
+                    ) : (
+                        <div className="bg-gray-200 border-4 border-card rounded-full w-32 h-32 flex items-center justify-center">
+                            <span className="text-4xl font-bold text-gray-600">
+                                {profileData.name?.charAt(0) || 'U'}
+                            </span>
+                        </div>
+                    )}
                 </div>
             </div>
 

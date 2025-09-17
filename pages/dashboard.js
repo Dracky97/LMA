@@ -5,6 +5,7 @@ import DashboardLayout from '../components/DashboardLayout';
 import EmployeeDashboard from '../components/dashboards/EmployeeDashboard';
 import DepartmentManagerDashboard from '../components/dashboards/DepartmentManagerDashboard';
 import AdminDashboard from '../components/dashboards/AdminDashboard';
+import HRManagerDashboard from '../components/dashboards/HRManagerDashboard';
 
 export default function LeaveDashboardPage() {
     const { userData, loading } = useAuth();
@@ -24,8 +25,11 @@ export default function LeaveDashboardPage() {
 
     const renderDashboard = () => {
         switch (userData.role) {
-            case 'Employee': 
+            case 'Employee':
                 return <EmployeeDashboard />;
+            
+            case 'Manager HR':
+                return <HRManagerDashboard />;
             
             case 'CEO':
             case 'CMO':
@@ -35,16 +39,15 @@ export default function LeaveDashboardPage() {
             case 'Head - Student Support': // <-- NEW ROLE ADDED
             case 'Manager IT':
             case 'Finance Manager':
-            case 'Manager HR':
             case 'Manager - Marketing & Student Enrolment':
             case 'Manager - Digital Marketing':
             case 'Sales Manager':
                 return <DepartmentManagerDashboard />;
 
-            case 'Admin': 
+            case 'Admin':
                 return <AdminDashboard />;
             
-            default: 
+            default:
                 return <div>Invalid User Role. Please contact an administrator.</div>;
         }
     };

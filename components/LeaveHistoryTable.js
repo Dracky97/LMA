@@ -31,6 +31,7 @@ export default function LeaveHistoryTable({ requests, users = {}, isAdminView = 
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Dates</th>
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Reason</th>
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Status</th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Rejection Reason</th>
                     </tr>
                 </thead>
                 <tbody className="bg-card divide-y divide-gray-700">
@@ -41,6 +42,15 @@ export default function LeaveHistoryTable({ requests, users = {}, isAdminView = 
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatDate(req.startDate)} - {formatDate(req.endDate)}</td>
                             <td className="px-6 py-4 text-sm text-slate-400 max-w-xs truncate">{req.reason}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{getStatusBadge(req.status)}</td>
+                            <td className="px-6 py-4 text-sm text-slate-400 max-w-xs truncate">
+                                {req.status === 'Rejected' && req.rejectionReason ? (
+                                    <span className="text-red-300" title={req.rejectionReason}>
+                                        {req.rejectionReason}
+                                    </span>
+                                ) : (
+                                    <span className="text-slate-500">-</span>
+                                )}
+                            </td>
                         </tr>
                     ))}
                 </tbody>

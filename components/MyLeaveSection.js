@@ -37,7 +37,7 @@ export default function MyLeaveSection() {
 
   return (
     <div className="space-y-8">
-      <LeaveBalanceCard balances={userData.leaveBalance} />
+      <LeaveBalanceCard balances={userData.leaveBalance} gender={userData.gender} userData={userData} />
       <div className="bg-card p-6 rounded-lg shadow-sm">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold text-slate-200">My Leave Requests</h2>

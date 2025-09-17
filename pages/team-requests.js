@@ -5,6 +5,7 @@ import { app } from '../lib/firebase-client';
 import DashboardLayout from '../components/DashboardLayout';
 import ManagerRequestsTable from '../components/ManagerRequestsTable';
 import LeaveHistoryTable from '../components/LeaveHistoryTable';
+import { LEAVE_TYPE_MAP, validateLeaveType } from '../lib/leaveTypes';
 
 const db = getFirestore(app);
 
@@ -66,11 +67,29 @@ export default function TeamRequestsPage() {
                 const userDoc = await getDoc(userRef);
                 if (userDoc.exists()) {
                     const currentData = userDoc.data();
-                    const leaveType = request.type.toLowerCase();
-                    
-                    // Validate leave type exists in user's balance
-                    if (!currentData.leaveBalance.hasOwnProperty(leaveType)) {
-                        throw new Error(`Invalid leave type: ${request.type}`);
+                    // Convert leave type name to match the balance structure
+                    const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(' ', '');
+
+                    // Validate leave type using shared function
+                    validateLeaveType(leaveType, currentData.gender);
+
+                    // Debug: Log available leave balance keys
+                    console.log('User leave balance keys:', Object.keys(currentData.leaveBalance || {}));
+                    console.log('Looking for leave type:', leaveType);
+                    console.log('Request type:', request.type);
+
+                    // Validate leave type exists in user's balance, if not initialize it to 0
+                    if (!currentData.leaveBalance || !currentData.leaveBalance.hasOwnProperty(leaveType)) {
+                        // Initialize missing leave type to 0
+                        if (!currentData.leaveBalance) {
+                            currentData.leaveBalance = {};
+                        }
+                        currentData.leaveBalance[leaveType] = 0;
+                        
+                        // Update user document with the missing leave type
+                        await updateDoc(userRef, {
+                            [`leaveBalance.${leaveType}`]: 0
+                        });
                     }
                     
                     const currentBalance = currentData.leaveBalance[leaveType];

@@ -24,6 +24,21 @@ export const AuthProvider = ({ children }) => {
             
             setUser(currentUser);
             if (currentUser) {
+                // Check if session has expired (30 minutes)
+                const loginTime = localStorage.getItem('loginTime');
+                if (loginTime) {
+                    const now = new Date().getTime();
+                    const loginTimeMs = parseInt(loginTime);
+                    const thirtyMinutesInMs = 30 * 60 * 1000;
+                    
+                    if (now - loginTimeMs > thirtyMinutesInMs) {
+                        // Session expired, logout user
+                        signOut(auth);
+                        localStorage.removeItem('loginTime');
+                        return;
+                    }
+                }
+                
                 const userDocRef = doc(db, 'users', currentUser.uid);
                 unsubSnapshot = onSnapshot(userDocRef, (docSnap) => {
                     if (docSnap.exists()) {
@@ -58,10 +73,41 @@ export const AuthProvider = ({ children }) => {
         };
     }, [auth, db]);
 
-    const signup = async (name, email, password, department, managerId, employeeNumber = null) => {
+    const signup = async (name, email, password, department, managerId, employeeNumber = null, gender = null) => {
         try {
             const userCredential = await createUserWithEmailAndPassword(auth, email, password);
             const newUser = userCredential.user;
+            // Calculate prorated annual leave based on start date
+            const currentDate = new Date();
+            const currentMonth = currentDate.getMonth(); // 0-11 (Jan-Dec)
+            
+            // Prorated annual leave based on quarter
+            let annualLeave = 14; // Default for Jan-Mar
+            if (currentMonth >= 3 && currentMonth <= 5) { // Apr-Jun
+                annualLeave = 10;
+            } else if (currentMonth >= 6 && currentMonth <= 8) { // Jul-Sep
+                annualLeave = 7;
+            } else if (currentMonth >= 9) { // Oct-Dec
+                annualLeave = 4;
+            }
+            
+            // Set gender-specific leave balances
+            let leaveBalance = {
+                annualLeave,
+                sickLeave: 7,
+                casualLeave: 7,
+                'leave in-lieu': 0,
+                shortLeave: 12,
+                other: 0
+            };
+            
+            if (gender === 'female') {
+                // Default maternity leave for first and second child
+                leaveBalance = { ...leaveBalance, maternityLeave: 84 };
+            } else if (gender === 'male') {
+                leaveBalance = { ...leaveBalance, paternityLeave: 3 };
+            }
+            
             return await setDoc(doc(db, 'users', newUser.uid), {
                 name,
                 email,
@@ -70,12 +116,13 @@ export const AuthProvider = ({ children }) => {
                 department,
                 managerId: managerId || null,
                 employeeNumber, // Add employee number field
-                leaveBalance: { annual: 14, sick: 7, casual: 5 },
+                gender, // Add gender field
+                leaveBalance,
                 personalDetails: { phone: '', address: '', dob: '' },
                 education: [],
                 qualifications: [],
                 socialMedia: { linkedin: '', twitter: '' },
-                createdAt: new Date(),
+                createdAt: currentDate,
             });
         } catch (error) {
             console.error("Error signing up:", error);
@@ -85,7 +132,10 @@ export const AuthProvider = ({ children }) => {
 
     const login = async (email, password) => {
         try {
-            return await signInWithEmailAndPassword(auth, email, password);
+            const userCredential = await signInWithEmailAndPassword(auth, email, password);
+            // Set login time in localStorage for session expiration
+            localStorage.setItem('loginTime', new Date().getTime().toString());
+            return userCredential;
         } catch (error) {
             console.error("Error logging in:", error);
             throw new Error(`Login failed: ${error.message}`);
@@ -94,7 +144,13 @@ export const AuthProvider = ({ children }) => {
     
     const logout = async () => {
         try {
-            return await signOut(auth);
+            await signOut(auth);
+            // Remove login time from localStorage
+            localStorage.removeItem('loginTime');
+            // Redirect to login page after logout
+            if (typeof window !== 'undefined') {
+                window.location.href = '/';
+            }
         } catch (error) {
             console.error("Error logging out:", error);
             throw new Error(`Logout failed: ${error.message}`);

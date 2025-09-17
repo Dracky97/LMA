@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Users collection rules
+    match /users/{userId} {
+      // Users can read and write their own data
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Managers can read user data for their team members
+      allow read: if request.auth != null &&
+                     request.auth.uid in resource.data.managerId;
+      
+      // Managers can update leave balances when approving leave requests
+      allow update: if request.auth != null &&
+                       request.auth.uid == resource.data.managerId &&
+                       // Only allow updating leave balance fields
+                       request.resource.data.diff(resource.data).affectedKeys()
+                       .hasOnly(['leaveBalance']);
+      
+      // Allow all authenticated users to read basic user info (needed for dropdowns, etc.)
+      allow read: if request.auth != null;
+      
+      // Allow admins to update user leave balances for reset functionality
+      allow update: if request.auth != null &&
+                       get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin' &&
+                       // Only allow updating leave balance fields for admin reset
+                       request.resource.data.diff(resource.data).affectedKeys()
+                       .hasOnly(['leaveBalance']);
+    }
+    
+    // Leave requests collection rules
+    match /leaveRequests/{requestId} {
+      // Users can create their own leave requests
+      allow create: if request.auth != null &&
+                       request.auth.uid == request.resource.data.userId;
+      
+      // Users can read their own leave requests
+      allow read: if request.auth != null &&
+                     request.auth.uid == resource.data.userId;
+      
+      // Direct managers can read and update leave requests for their team members
+      allow read, update: if request.auth != null &&
+                             request.auth.uid == resource.data.managerId;
+      
+      // HR Managers and Admins can read and update all leave requests (including rejection reasons)
+      allow read, update: if request.auth != null &&
+                             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'HR Manager'];
+      
+      // Department Managers can read and update leave requests for their team
+      allow read, update: if request.auth != null &&
+                             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isManager == true &&
+                             request.auth.uid == resource.data.managerId;
+    }
+    
+    // Allow reading other collections that might be needed
+    match /{document=**} {
+      // Fallback rule for authenticated users to read other documents
+      allow read: if request.auth != null;
+    }
+  }
+}

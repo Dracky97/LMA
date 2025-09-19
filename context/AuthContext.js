@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { app } from '../lib/firebase-client';
 
@@ -73,7 +73,7 @@ export const AuthProvider = ({ children }) => {
         };
     }, [auth, db]);
 
-    const signup = async (name, email, password, department, managerId, employeeNumber = null, gender = null) => {
+    const signup = async (name, email, password, department, managerId, employeeNumber = null, gender = null, designation = null, birthday = null) => {
         try {
             const userCredential = await createUserWithEmailAndPassword(auth, email, password);
             const newUser = userCredential.user;
@@ -117,11 +117,12 @@ export const AuthProvider = ({ children }) => {
                 managerId: managerId || null,
                 employeeNumber, // Add employee number field
                 gender, // Add gender field
-                leaveBalance,
-                personalDetails: { phone: '', address: '', dob: '' },
+                designation, // Add designation field
+                personalDetails: { phone: '', address: '', dob: birthday || '' },
                 education: [],
                 qualifications: [],
                 socialMedia: { linkedin: '', twitter: '' },
+                leaveBalance,
                 createdAt: currentDate,
             });
         } catch (error) {
@@ -157,7 +158,36 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    const value = { user, userData, loading, signup, login, logout };
+    const resetPassword = async (email) => {
+        try {
+            await sendPasswordResetEmail(auth, email);
+            return { success: true, message: 'Password reset email sent successfully!' };
+        } catch (error) {
+            console.error("Error sending password reset email:", error);
+            throw new Error(`Password reset failed: ${error.message}`);
+        }
+    };
+
+    const changePassword = async (currentPassword, newPassword) => {
+        try {
+            if (!user) {
+                throw new Error('No user is currently signed in');
+            }
+
+            // Re-authenticate user before changing password
+            const credential = EmailAuthProvider.credential(user.email, currentPassword);
+            await reauthenticateWithCredential(user, credential);
+            
+            // Update password
+            await updatePassword(user, newPassword);
+            return { success: true, message: 'Password updated successfully!' };
+        } catch (error) {
+            console.error("Error changing password:", error);
+            throw new Error(`Password change failed: ${error.message}`);
+        }
+    };
+
+    const value = { user, userData, loading, signup, login, logout, resetPassword, changePassword };
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 

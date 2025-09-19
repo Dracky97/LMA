@@ -8,8 +8,13 @@ const db = getFirestore(app);
 
 export default function AdminDashboard() {
     const [users, setUsers] = useState([]);
+    const [filteredUsers, setFilteredUsers] = useState([]);
     const [managers, setManagers] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [roleFilter, setRoleFilter] = useState('');
+    const [departmentFilter, setDepartmentFilter] = useState('');
+    const [managerFilter, setManagerFilter] = useState('');
     const [showAddUserForm, setShowAddUserForm] = useState(false);
     const [newUser, setNewUser] = useState({
         name: '',
@@ -18,7 +23,9 @@ export default function AdminDashboard() {
         department: '',
         managerId: '',
         employeeNumber: '',
-        gender: ''
+        gender: '',
+        designation: '',
+        birthday: ''
     });
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
@@ -27,10 +34,15 @@ export default function AdminDashboard() {
     const [showPasswordDialog, setShowPasswordDialog] = useState(false);
     const [adminPassword, setAdminPassword] = useState('');
     const [passwordError, setPasswordError] = useState('');
+    const [editingUser, setEditingUser] = useState(null);
+    const [showEditModal, setShowEditModal] = useState(false);
+    const [editUserData, setEditUserData] = useState({});
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
     const { signup } = useAuth();
 
     const roleOptions = [
         'Employee',
+        'Admin',
         'CEO',
         'CMO',
         'CFO',
@@ -53,6 +65,7 @@ export default function AdminDashboard() {
         { value: 'Marketing', label: 'Marketing' },
         { value: 'Administration', label: 'Administration' },
         { value: 'IT', label: 'IT' },
+        { value: 'Operations', label: 'Operations' },
         { value: 'Registrar', label: 'Registrar' },
         { value: 'Student Support', label: 'Student Support' }
     ];
@@ -72,6 +85,41 @@ export default function AdminDashboard() {
         return () => unsubscribe();
     }, []);
 
+    // Filter users based on search query and filters
+    useEffect(() => {
+        let filtered = users;
+
+        // Apply search query filter
+        if (searchQuery.trim()) {
+            filtered = filtered.filter(user =>
+                user.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                user.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                user.employeeNumber?.toLowerCase().includes(searchQuery.toLowerCase())
+            );
+        }
+
+        // Apply role filter
+        if (roleFilter) {
+            filtered = filtered.filter(user => user.role === roleFilter);
+        }
+
+        // Apply department filter
+        if (departmentFilter) {
+            filtered = filtered.filter(user => user.department === departmentFilter);
+        }
+
+        // Apply manager filter
+        if (managerFilter) {
+            if (managerFilter === 'no-manager') {
+                filtered = filtered.filter(user => !user.managerId);
+            } else {
+                filtered = filtered.filter(user => user.managerId === managerFilter);
+            }
+        }
+
+        setFilteredUsers(filtered);
+    }, [users, searchQuery, roleFilter, departmentFilter, managerFilter]);
+
     const handleFieldUpdate = async (userId, field, value) => {
         try {
             const userDocRef = doc(db, 'users', userId);
@@ -82,6 +130,86 @@ export default function AdminDashboard() {
             await updateDoc(userDocRef, updateData);
         } catch (error) {
             console.error(`Error updating ${field}:`, error);
+        }
+    };
+
+    const handleDeleteUser = async (userId) => {
+        try {
+            // Delete user document from Firestore
+            const userDocRef = doc(db, 'users', userId);
+            await updateDoc(userDocRef, {
+                deleted: true,
+                deletedAt: new Date(),
+                deletedBy: users.find(u => u.role === 'Admin')?.id || 'admin'
+            });
+            
+            // You might also want to delete from Firebase Auth, but that requires admin SDK
+            setSuccess('User deleted successfully');
+            setShowDeleteConfirm(null);
+        } catch (error) {
+            console.error('Error deleting user:', error);
+            setError('Failed to delete user: ' + error.message);
+        }
+    };
+
+    const openEditModal = (user) => {
+        setEditingUser(user);
+        setEditUserData({
+            name: user.name || '',
+            email: user.email || '',
+            role: user.role || 'Employee',
+            department: user.department || '',
+            designation: user.designation || '',
+            employeeNumber: user.employeeNumber || '',
+            gender: user.gender || '',
+            managerId: user.managerId || '',
+            personalDetails: user.personalDetails || { phone: '', address: '', dob: '' },
+            leaveBalance: user.leaveBalance || {}
+        });
+        setShowEditModal(true);
+    };
+
+    const handleEditUserChange = (e, section = null) => {
+        const { name, value } = e.target;
+        
+        if (section) {
+            setEditUserData(prev => ({
+                ...prev,
+                [section]: { ...prev[section], [name]: value }
+            }));
+        } else {
+            setEditUserData(prev => ({
+                ...prev,
+                [name]: value
+            }));
+        }
+    };
+
+    const handleLeaveBalanceChange = (leaveType, value) => {
+        setEditUserData(prev => ({
+            ...prev,
+            leaveBalance: {
+                ...prev.leaveBalance,
+                [leaveType]: parseFloat(value) || 0
+            }
+        }));
+    };
+
+    const saveUserChanges = async () => {
+        try {
+            const userDocRef = doc(db, 'users', editingUser.id);
+            const updateData = { ...editUserData };
+            
+            // Update isManager flag based on role
+            updateData.isManager = (updateData.role !== 'Employee');
+            
+            await updateDoc(userDocRef, updateData);
+            setSuccess('User updated successfully');
+            setShowEditModal(false);
+            setEditingUser(null);
+        } catch (error) {
+            console.error('Error updating user:', error);
+            setError('Failed to update user: ' + error.message);
         }
     };
 
@@ -106,7 +234,9 @@ export default function AdminDashboard() {
                 newUser.department,
                 newUser.managerId || null,
                 newUser.employeeNumber || null,
-                newUser.gender || null
+                newUser.gender || null,
+                newUser.designation || null,
+                newUser.birthday || null
             );
             setSuccess('User added successfully!');
             // Reset form
@@ -117,7 +247,9 @@ export default function AdminDashboard() {
                 department: '',
                 managerId: '',
                 employeeNumber: '',
-                gender: ''
+                gender: '',
+                designation: '',
+                birthday: ''
             });
             // Close the form after a short delay
             setTimeout(() => {
@@ -252,6 +384,94 @@ export default function AdminDashboard() {
                         Add New User
                     </button>
                 </div>
+
+                {/* Search and Filters */}
+                <div className="mb-6 space-y-4">
+                    {/* Search Bar */}
+                    <div className="relative">
+                        <input
+                            type="text"
+                            placeholder="Search by name, email, or employee number..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full pl-10 pr-4 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                        />
+                        <svg className="absolute left-3 top-2.5 h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </div>
+
+                    {/* Filter Row */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        {/* Role Filter */}
+                        <div>
+                            <label className="block text-sm font-medium text-slate-300 mb-1">Filter by Role</label>
+                            <select
+                                value={roleFilter}
+                                onChange={(e) => setRoleFilter(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                            >
+                                <option value="">All Roles</option>
+                                {roleOptions.map(role => (
+                                    <option key={role} value={role}>{role}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Department Filter */}
+                        <div>
+                            <label className="block text-sm font-medium text-slate-300 mb-1">Filter by Department</label>
+                            <select
+                                value={departmentFilter}
+                                onChange={(e) => setDepartmentFilter(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                            >
+                                <option value="">All Departments</option>
+                                {departmentOptions.map(dept => (
+                                    <option key={dept.value} value={dept.value}>{dept.label}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Manager Filter */}
+                        <div>
+                            <label className="block text-sm font-medium text-slate-300 mb-1">Filter by Manager</label>
+                            <select
+                                value={managerFilter}
+                                onChange={(e) => setManagerFilter(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                            >
+                                <option value="">All Managers</option>
+                                <option value="no-manager">No Manager</option>
+                                {managers.map(manager => (
+                                    <option key={manager.id} value={manager.id}>
+                                        {manager.name} ({manager.role})
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Clear Filters */}
+                        <div className="flex items-end">
+                            <button
+                                onClick={() => {
+                                    setSearchQuery('');
+                                    setRoleFilter('');
+                                    setDepartmentFilter('');
+                                    setManagerFilter('');
+                                }}
+                                className="w-full px-3 py-2 border border-gray-600 text-slate-300 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 transition duration-150 ease-in-out"
+                            >
+                                Clear Filters
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Results Count */}
+                    <div className="text-sm text-slate-400">
+                        Showing {filteredUsers.length} of {users.length} users
+                    </div>
+                </div>
             
             {showAddUserForm && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -385,6 +605,29 @@ export default function AdminDashboard() {
                                     </select>
                                 </div>
                                 
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Designation (Optional)</label>
+                                    <input
+                                        type="text"
+                                        name="designation"
+                                        value={newUser.designation}
+                                        onChange={handleAddUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        placeholder="e.g., Senior Developer, Marketing Specialist"
+                                    />
+                                </div>
+                                
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Birthday (Optional)</label>
+                                    <input
+                                        type="date"
+                                        name="birthday"
+                                        value={newUser.birthday}
+                                        onChange={handleAddUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    />
+                                </div>
+                                
                                 <div className="flex justify-end space-x-3">
                                     <button
                                         type="button"
@@ -478,58 +721,348 @@ export default function AdminDashboard() {
                     </div>
                 </div>
             )}
+
+            {/* User Edit Modal */}
+            {showEditModal && editingUser && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-card rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+                        <div className="p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-medium text-slate-200">Edit User: {editingUser.name}</h3>
+                                <button
+                                    onClick={() => {
+                                        setShowEditModal(false);
+                                        setEditingUser(null);
+                                        setError('');
+                                        setSuccess('');
+                                    }}
+                                    className="text-slate-400 hover:text-slate-200"
+                                >
+                                    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* Basic Information */}
+                                <div className="space-y-4">
+                                    <h4 className="text-md font-semibold text-slate-300">Basic Information</h4>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-300 mb-1">Name</label>
+                                        <input
+                                            type="text"
+                                            name="name"
+                                            value={editUserData.name}
+                                            onChange={handleEditUserChange}
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-300 mb-1">Email</label>
+                                        <input
+                                            type="email"
+                                            name="email"
+                                            value={editUserData.email}
+                                            onChange={handleEditUserChange}
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-300 mb-1">Role</label>
+                                        <select
+                                            name="role"
+                                            value={editUserData.role}
+                                            onChange={handleEditUserChange}
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            {roleOptions.map(role => (
+                                                <option key={role} value={role}>{role}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-300 mb-1">Department</label>
+                                        <select
+                                            name="department"
+                                            value={editUserData.department}
+                                            onChange={handleEditUserChange}
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            <option value="">Select Department</option>
+                                            {departmentOptions.map(dept => (
+                                                <option key={dept.value} value={dept.value}>{dept.label}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-300 mb-1">Designation</label>
+                                        <input
+                                            type="text"
+                                            name="designation"
+                                            value={editUserData.designation}
+                                            onChange={handleEditUserChange}
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-300 mb-1">Employee Number</label>
+                                        <input
+                                            type="text"
+                                            name="employeeNumber"
+                                            value={editUserData.employeeNumber}
+                                            onChange={handleEditUserChange}
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-300 mb-1">Gender</label>
+                                        <select
+                                            name="gender"
+                                            value={editUserData.gender}
+                                            onChange={handleEditUserChange}
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            <option value="">Select Gender</option>
+                                            <option value="male">Male</option>
+                                            <option value="female">Female</option>
+                                        </select>
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-300 mb-1">Manager</label>
+                                        <select
+                                            name="managerId"
+                                            value={editUserData.managerId}
+                                            onChange={handleEditUserChange}
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            <option value="">No Manager (Top Level)</option>
+                                            {managers.map(manager => (
+                                                <option key={manager.id} value={manager.id}>
+                                                    {manager.name} ({manager.role})
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                {/* Personal Details & Leave Balance */}
+                                <div className="space-y-4">
+                                    <h4 className="text-md font-semibold text-slate-300">Personal Details</h4>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-300 mb-1">Phone</label>
+                                        <input
+                                            type="text"
+                                            name="phone"
+                                            value={editUserData.personalDetails?.phone || ''}
+                                            onChange={(e) => handleEditUserChange(e, 'personalDetails')}
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-300 mb-1">Address</label>
+                                        <textarea
+                                            name="address"
+                                            value={editUserData.personalDetails?.address || ''}
+                                            onChange={(e) => handleEditUserChange(e, 'personalDetails')}
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            rows="2"
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-300 mb-1">Date of Birth</label>
+                                        <input
+                                            type="date"
+                                            name="dob"
+                                            value={editUserData.personalDetails?.dob || ''}
+                                            onChange={(e) => handleEditUserChange(e, 'personalDetails')}
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                    </div>
+                                    
+                                    <h4 className="text-md font-semibold text-slate-300 mt-6">Leave Balance</h4>
+                                    
+                                    {Object.entries(editUserData.leaveBalance || {}).map(([leaveType, balance]) => (
+                                        <div key={leaveType}>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1 capitalize">
+                                                {leaveType.replace(/([A-Z])/g, ' $1').trim()}
+                                            </label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={balance}
+                                                onChange={(e) => handleLeaveBalanceChange(leaveType, e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            
+                            {error && (
+                                <div className="mt-4 p-3 bg-red-900/30 text-red-300 rounded-md text-sm">
+                                    {error}
+                                </div>
+                            )}
+                            
+                            {success && (
+                                <div className="mt-4 p-3 bg-green-900/30 text-green-300 rounded-md text-sm">
+                                    {success}
+                                </div>
+                            )}
+                            
+                            <div className="flex justify-end space-x-3 mt-6">
+                                <button
+                                    onClick={() => {
+                                        setShowEditModal(false);
+                                        setEditingUser(null);
+                                        setError('');
+                                        setSuccess('');
+                                    }}
+                                    className="px-4 py-2 border border-gray-600 text-slate-300 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 transition duration-150 ease-in-out"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={saveUserChanges}
+                                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-150 ease-in-out"
+                                >
+                                    Save Changes
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Delete Confirmation Modal */}
+            {showDeleteConfirm && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md">
+                        <div className="p-6">
+                            <div className="flex items-center mb-4">
+                                <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
+                                    <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                                    </svg>
+                                </div>
+                            </div>
+                            <div className="text-center">
+                                <h3 className="text-lg font-medium text-slate-200 mb-2">Delete User</h3>
+                                <p className="text-sm text-slate-400 mb-4">
+                                    Are you sure you want to delete <strong>{showDeleteConfirm.name}</strong>? This action will mark the user as deleted and cannot be undone.
+                                </p>
+                                <div className="flex justify-center space-x-3">
+                                    <button
+                                        onClick={() => setShowDeleteConfirm(null)}
+                                        className="px-4 py-2 border border-gray-600 text-slate-300 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 transition duration-150 ease-in-out"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={() => handleDeleteUser(showDeleteConfirm.id)}
+                                        className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-150 ease-in-out"
+                                    >
+                                        Delete User
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
             
             <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-700">
                     <thead className="bg-muted">
                         <tr>
                             <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Name</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Email</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Role</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Is Manager?</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Employee Number</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Assign Manager</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Department</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Employee #</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Manager</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
                     <tbody className="bg-card divide-y divide-gray-700">
-                        {users.map(user => (
+                        {filteredUsers.filter(user => !user.deleted).map(user => (
                             <tr key={user.id}>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-200">{user.name}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-                                    <select
-                                        value={user.role}
-                                        onChange={(e) => handleFieldUpdate(user.id, 'role', e.target.value)}
-                                        className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md text-slate-200 bg-card"
-                                    >
-                                        {roleOptions.map(role => <option key={role} value={role}>{role}</option>)}
-                                    </select>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-200">
+                                    <div>
+                                        <div className="font-medium">{user.name}</div>
+                                        <div className="text-xs text-slate-400">{user.designation || 'No designation'}</div>
+                                    </div>
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-                                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${user.isManager ? 'bg-green-900/30 text-green-300' : 'bg-red-900/30 text-red-300'}`}>
-                                        {user.isManager ? 'Yes' : 'No'}
-                                    </span>
+                                    {user.email}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+                                    <div>
+                                        <select
+                                            value={user.role}
+                                            onChange={(e) => handleFieldUpdate(user.id, 'role', e.target.value)}
+                                            className="block w-full pl-3 pr-10 py-1 text-xs border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 rounded-md text-slate-200 bg-card"
+                                        >
+                                            {roleOptions.map(role => <option key={role} value={role}>{role}</option>)}
+                                        </select>
+                                        <span className={`mt-1 px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${user.isManager ? 'bg-green-900/30 text-green-300' : 'bg-gray-900/30 text-gray-300'}`}>
+                                            {user.isManager ? 'Manager' : 'Employee'}
+                                        </span>
+                                    </div>
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+                                    {user.department || 'Not assigned'}
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
                                     <input
                                         type="text"
                                         value={user.employeeNumber || ''}
                                         onChange={(e) => handleFieldUpdate(user.id, 'employeeNumber', e.target.value)}
-                                        className="mt-1 block w-full px-3 py-2 text-base border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md text-slate-200 bg-card"
-                                        placeholder="Enter employee number"
+                                        className="block w-full px-2 py-1 text-xs border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 rounded-md text-slate-200 bg-card"
+                                        placeholder="Enter ID"
                                     />
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-                                    <select
-                                        value={user.managerId || ''}
-                                        onChange={(e) => handleFieldUpdate(user.id, 'managerId', e.target.value)}
-                                        className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md text-slate-200 bg-card"
-                                    >
-                                        <option value="">No Manager (Top Level)</option>
-                                        {managers.map(manager => (
-                                            <option key={manager.id} value={manager.id}>
-                                                {manager.name} ({manager.role})
-                                            </option>
-                                        ))}
-                                    </select>
+                                    {user.managerId ?
+                                        managers.find(m => m.id === user.managerId)?.name || 'Unknown Manager'
+                                        : 'No Manager'
+                                    }
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+                                    <div className="flex space-x-2">
+                                        <button
+                                            onClick={() => openEditModal(user)}
+                                            className="text-blue-400 hover:text-blue-300 text-xs"
+                                            title="Edit User"
+                                        >
+                                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                            </svg>
+                                        </button>
+                                        {user.role !== 'Admin' && (
+                                            <button
+                                                onClick={() => setShowDeleteConfirm(user)}
+                                                className="text-red-400 hover:text-red-300 text-xs"
+                                                title="Delete User"
+                                            >
+                                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                </svg>
+                                            </button>
+                                        )}
+                                    </div>
                                 </td>
                             </tr>
                         ))}

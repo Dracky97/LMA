@@ -78,7 +78,9 @@ export default function ProfilePage() {
                     <div className="flex justify-between items-start">
                         <div>
                             <h1 className="text-3xl font-bold text-slate-200">{profileData.name}</h1>
-                            <p className="text-lg text-slate-400 mt-1">{profileData.role} - {profileData.department}</p>
+                            <p className="text-lg text-slate-400 mt-1">
+                                {profileData.designation ? `${profileData.designation} - ` : ''}{profileData.department}
+                            </p>
                             <p className="text-slate-500 mt-2">{profileData.personalDetails?.address || 'Location not specified'}</p>
                         </div>
                         {canEdit && (
@@ -111,6 +113,18 @@ export default function ProfilePage() {
                                     <p className="text-sm text-slate-400">Employee Number</p>
                                     <p className="text-slate-200">{profileData.employeeNumber || 'Not provided'}</p>
                                 </div>
+                                {profileData.designation && (
+                                    <div>
+                                        <p className="text-sm text-slate-400">Designation</p>
+                                        <p className="text-slate-200">{profileData.designation}</p>
+                                    </div>
+                                )}
+                                {profileData.personalDetails?.dob && (
+                                    <div>
+                                        <p className="text-sm text-slate-400">Date of Birth</p>
+                                        <p className="text-slate-200">{new Date(profileData.personalDetails.dob).toLocaleDateString()}</p>
+                                    </div>
+                                )}
                                 <div>
                                     <p className="text-sm text-slate-400">Address</p>
                                     <p className="text-slate-200">{profileData.personalDetails?.address || 'Not provided'}</p>

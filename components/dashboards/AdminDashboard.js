@@ -989,7 +989,6 @@ export default function AdminDashboard() {
                         <tr>
                             <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Name</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Email</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Role</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Department</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Employee #</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Manager</th>
@@ -1007,20 +1006,6 @@ export default function AdminDashboard() {
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
                                     {user.email}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-                                    <div>
-                                        <select
-                                            value={user.role}
-                                            onChange={(e) => handleFieldUpdate(user.id, 'role', e.target.value)}
-                                            className="block w-full pl-3 pr-10 py-1 text-xs border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 rounded-md text-slate-200 bg-card"
-                                        >
-                                            {roleOptions.map(role => <option key={role} value={role}>{role}</option>)}
-                                        </select>
-                                        <span className={`mt-1 px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${user.isManager ? 'bg-green-900/30 text-green-300' : 'bg-gray-900/30 text-gray-300'}`}>
-                                            {user.isManager ? 'Manager' : 'Employee'}
-                                        </span>
-                                    </div>
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
                                     {user.department || 'Not assigned'}

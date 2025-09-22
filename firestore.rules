@@ -42,7 +42,7 @@ service cloud.firestore {
       
       // HR Managers and Admins can read and update all leave requests (including rejection reasons)
       allow read, update: if request.auth != null &&
-                             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'HR Manager'];
+                             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'Manager HR'];
       
       // Department Managers can read and update leave requests for their team
       allow read, update: if request.auth != null &&

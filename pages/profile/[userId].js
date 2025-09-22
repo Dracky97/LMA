@@ -44,7 +44,7 @@ export default function ProfilePage() {
             <div className="relative rounded-t-lg h-48">
                 {/* Cover Photo */}
                 {profileData.coverImageUrl ? (
-                    <img
+                    <imgage
                         src={profileData.coverImageUrl}
                         alt="Cover"
                         className="w-full h-full object-cover rounded-t-lg"
@@ -56,7 +56,7 @@ export default function ProfilePage() {
                 {/* Profile Picture */}
                 <div className="absolute -bottom-16 left-8">
                     {profileData.profileImageUrl ? (
-                        <img
+                        <imgage
                             src={profileData.profileImageUrl}
                             alt="Profile"
                             className="border-4 border-card rounded-full w-32 h-32 object-cover"

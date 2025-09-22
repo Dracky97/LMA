@@ -13,6 +13,7 @@ const logger = require("firebase-functions/logger");
 // FILE: functions/index.js
 
 const functions = require("firebase-functions");
+const { config } = require("firebase-functions");
 const admin = require("firebase-admin");
 const nodemailer = require("nodemailer");
 
@@ -22,9 +23,11 @@ const db = admin.firestore();
 
 // --- Nodemailer Transporter Configuration for Local Testing ---
 const transporter = nodemailer.createTransport({
-    host: "localhost",
-    port: 2525, // This is the port smtp4dev is listening on
-    secure: false, 
+    service: "gmail",
+    auth: {
+        user: functions.config().gmail.email,
+        pass: functions.config().gmail.password,
+    },
 });
 
 /**

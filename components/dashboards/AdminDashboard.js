@@ -340,7 +340,7 @@ export default function AdminDashboard() {
                 <div className="flex justify-between items-center mb-4">
                     <div>
                         <h2 className="text-xl font-semibold text-slate-200">System Management</h2>
-                        <p className="text-sm text-slate-400 mt-1">Reset all users' leave balances to annual allocations</p>
+                        <p className="text-sm text-slate-400 mt-1">Reset all users&apos; leave balances to annual allocations</p>
                     </div>
                     <button
                         onClick={handleResetAllLeaveBalances}

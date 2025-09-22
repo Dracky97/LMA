@@ -126,8 +126,8 @@ export default function AuthPage({ title }) {
         <form onSubmit={handleForgotPassword} className="bg-card p-6 rounded-lg shadow-sm border border-gray-700">
           <h3 className="text-lg font-medium text-slate-200 mb-4">Reset Password</h3>
           <p className="text-sm text-slate-400 mb-4">
-            Enter your email address and we'll send you a link to reset your password.
-          </p>
+  Enter your email address and we&apos;ll send you a link to reset your password.
+</p>
           
           <InputField
             label="Email Address"

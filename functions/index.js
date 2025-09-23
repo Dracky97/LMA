@@ -13,13 +13,14 @@ exports.onLeaveRequestCreate = onDocumentCreated({
     document: "leaveRequests/{requestId}",
     region: "asia-southeast1"
 }, async (event) => {
-    // Initialize transporter INSIDE the function
+    // Initialize transporter INSIDE the function with your new email settings
     const transporter = nodemailer.createTransport({
-        host: "smtp-relay.brevo.com",
-        port: 587,
+        host: "mail.aibs.edu.lk",
+        port: 465,
+        secure: true, // Use true for port 465
         auth: {
-            user: functions.config().brevo.user,
-            pass: functions.config().brevo.key
+            user: functions.config().email.user,
+            pass: functions.config().email.pass
         }
     });
 
@@ -41,7 +42,7 @@ exports.onLeaveRequestCreate = onDocumentCreated({
     const employeeData = employeeDoc.data();
 
     const mailOptions = {
-        from: '"HR Portal" <noreply@hrportal.com>',
+        from: '"HRMS Portal" <hrms@aibs.edu.lk>', // Updated from address
         to: managerData.email,
         subject: `New Leave Request from ${employeeData.name}`,
         html: `<p>Hello ${managerData.name},</p><p>${employeeData.name} has submitted a new leave request for your approval.</p><p><strong>Type:</strong> ${requestData.type}</p><p><strong>Reason:</strong> ${requestData.reason}</p><p>Please log in to the HR Portal to review the request.</p>`,
@@ -59,13 +60,14 @@ exports.onLeaveRequestUpdate = onDocumentUpdated({
     document: "leaveRequests/{requestId}",
     region: "asia-southeast1"
 }, async (event) => {
-    // Initialize transporter INSIDE the function
+    // Initialize transporter INSIDE the function with your new email settings
     const transporter = nodemailer.createTransport({
-        host: "smtp-relay.brevo.com",
-        port: 587,
+        host: "mail.aibs.edu.lk",
+        port: 465,
+        secure: true, // Use true for port 465
         auth: {
-            user: functions.config().brevo.user,
-            pass: functions.config().brevo.key
+            user: functions.config().email.user,
+            pass: functions.config().email.pass
         }
     });
 
@@ -89,7 +91,7 @@ exports.onLeaveRequestUpdate = onDocumentUpdated({
     const employeeData = employeeDoc.data();
 
     const mailOptions = {
-        from: '"HR Portal" <noreply@hrportal.com>',
+        from: '"HRMS Portal" <hrms@aibs.edu.lk>', // Updated from address
         to: employeeData.email,
         subject: `Update on your leave request: ${afterData.status}`,
         html: `<p>Hello ${employeeData.name},</p><p>Your leave request has been updated. The new status is: <strong>${afterData.status}</strong>.</p>${afterData.status === 'Rejected' && afterData.rejectionReason ? `<p><strong>Reason for rejection:</strong> ${afterData.rejectionReason}</p>` : ''}<p>You can view the details by logging into the HR Portal.</p>`,

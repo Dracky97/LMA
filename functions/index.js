@@ -1,26 +1,24 @@
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
-const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const nodemailer = require("nodemailer");
 
+// Initialize Firebase Admin SDK
 admin.initializeApp();
 const db = admin.firestore();
-
-// Note: Transporter is NOT initialized here anymore.
 
 exports.onLeaveRequestCreate = onDocumentCreated({
     document: "leaveRequests/{requestId}",
     region: "asia-southeast1"
 }, async (event) => {
-    // Initialize transporter INSIDE the function with your new email settings
+    // Initialize transporter using new environment variables
     const transporter = nodemailer.createTransport({
         host: "mail.aibs.edu.lk",
         port: 465,
         secure: true, // Use true for port 465
         auth: {
-            user: functions.config().email.user,
-            pass: functions.config().email.pass
+            user: process.env.EMAIL_USER, // Correct v2 method
+            pass: process.env.EMAIL_PASS  // Correct v2 method
         }
     });
 
@@ -42,7 +40,7 @@ exports.onLeaveRequestCreate = onDocumentCreated({
     const employeeData = employeeDoc.data();
 
     const mailOptions = {
-        from: '"HRMS Portal" <hrms@aibs.edu.lk>', // Updated from address
+        from: '"HRMS Portal" <hrms@aibs.edu.lk>',
         to: managerData.email,
         subject: `New Leave Request from ${employeeData.name}`,
         html: `<p>Hello ${managerData.name},</p><p>${employeeData.name} has submitted a new leave request for your approval.</p><p><strong>Type:</strong> ${requestData.type}</p><p><strong>Reason:</strong> ${requestData.reason}</p><p>Please log in to the HR Portal to review the request.</p>`,
@@ -60,14 +58,14 @@ exports.onLeaveRequestUpdate = onDocumentUpdated({
     document: "leaveRequests/{requestId}",
     region: "asia-southeast1"
 }, async (event) => {
-    // Initialize transporter INSIDE the function with your new email settings
+    // Initialize transporter using new environment variables
     const transporter = nodemailer.createTransport({
         host: "mail.aibs.edu.lk",
         port: 465,
         secure: true, // Use true for port 465
         auth: {
-            user: functions.config().email.user,
-            pass: functions.config().email.pass
+            user: process.env.EMAIL_USER, // Correct v2 method
+            pass: process.env.EMAIL_PASS  // Correct v2 method
         }
     });
 
@@ -91,7 +89,7 @@ exports.onLeaveRequestUpdate = onDocumentUpdated({
     const employeeData = employeeDoc.data();
 
     const mailOptions = {
-        from: '"HRMS Portal" <hrms@aibs.edu.lk>', // Updated from address
+        from: '"HRMS Portal" <hrms@aibs.edu.lk>',
         to: employeeData.email,
         subject: `Update on your leave request: ${afterData.status}`,
         html: `<p>Hello ${employeeData.name},</p><p>Your leave request has been updated. The new status is: <strong>${afterData.status}</strong>.</p>${afterData.status === 'Rejected' && afterData.rejectionReason ? `<p><strong>Reason for rejection:</strong> ${afterData.rejectionReason}</p>` : ''}<p>You can view the details by logging into the HR Portal.</p>`,

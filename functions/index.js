@@ -1,43 +1,34 @@
-// functions/index.js
-
-const { setGlobalOptions } = require("firebase-functions/v2");
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const nodemailer = require("nodemailer");
-const functions = require("firebase-functions");
 
-// Initialize the Firebase Admin SDK
 admin.initializeApp();
 const db = admin.firestore();
 
-// Set global options for all functions
-setGlobalOptions({ maxInstances: 10 });
+// Note: Transporter is NOT initialized here anymore.
 
-// Nodemailer Transporter Configuration using Firebase environment variables
-const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-        user: functions.config().gmail.email,
-        pass: functions.config().gmail.password,
-    },
-});
-
-/**
- * Triggered when a new leave request is created.
- */
 exports.onLeaveRequestCreate = onDocumentCreated({
     document: "leaveRequests/{requestId}",
     region: "asia-southeast1"
 }, async (event) => {
-    // ... (rest of the function code is the same)
+    // Initialize transporter INSIDE the function
+    const transporter = nodemailer.createTransport({
+        host: "smtp-relay.brevo.com",
+        port: 587,
+        auth: {
+            user: functions.config().brevo.user,
+            pass: functions.config().brevo.key
+        }
+    });
+
     const snap = event.data;
     if (!snap) {
         console.log("No data associated with the event");
         return;
     }
     const requestData = snap.data();
-
     const managerDoc = await db.collection("users").doc(requestData.managerId).get();
     const employeeDoc = await db.collection("users").doc(requestData.userId).get();
 
@@ -53,13 +44,7 @@ exports.onLeaveRequestCreate = onDocumentCreated({
         from: '"HR Portal" <noreply@hrportal.com>',
         to: managerData.email,
         subject: `New Leave Request from ${employeeData.name}`,
-        html: `
-            <p>Hello ${managerData.name},</p>
-            <p>${employeeData.name} has submitted a new leave request for your approval.</p>
-            <p><strong>Type:</strong> ${requestData.type}</p>
-            <p><strong>Reason:</strong> ${requestData.reason}</p>
-            <p>Please log in to the HR Portal to review the request.</p>
-        `,
+        html: `<p>Hello ${managerData.name},</p><p>${employeeData.name} has submitted a new leave request for your approval.</p><p><strong>Type:</strong> ${requestData.type}</p><p><strong>Reason:</strong> ${requestData.reason}</p><p>Please log in to the HR Portal to review the request.</p>`,
     };
 
     try {
@@ -70,14 +55,20 @@ exports.onLeaveRequestCreate = onDocumentCreated({
     }
 });
 
-/**
- * Triggered when a leave request is updated.
- */
 exports.onLeaveRequestUpdate = onDocumentUpdated({
     document: "leaveRequests/{requestId}",
     region: "asia-southeast1"
 }, async (event) => {
-    // ... (rest of the function code is the same)
+    // Initialize transporter INSIDE the function
+    const transporter = nodemailer.createTransport({
+        host: "smtp-relay.brevo.com",
+        port: 587,
+        auth: {
+            user: functions.config().brevo.user,
+            pass: functions.config().brevo.key
+        }
+    });
+
     const change = event.data;
     if (!change) {
         console.log("No data associated with the event");
@@ -101,12 +92,7 @@ exports.onLeaveRequestUpdate = onDocumentUpdated({
         from: '"HR Portal" <noreply@hrportal.com>',
         to: employeeData.email,
         subject: `Update on your leave request: ${afterData.status}`,
-        html: `
-            <p>Hello ${employeeData.name},</p>
-            <p>Your leave request has been updated. The new status is: <strong>${afterData.status}</strong>.</p>
-            ${afterData.status === 'Rejected' && afterData.rejectionReason ? `<p><strong>Reason for rejection:</strong> ${afterData.rejectionReason}</p>` : ''}
-            <p>You can view the details by logging into the HR Portal.</p>
-        `,
+        html: `<p>Hello ${employeeData.name},</p><p>Your leave request has been updated. The new status is: <strong>${afterData.status}</strong>.</p>${afterData.status === 'Rejected' && afterData.rejectionReason ? `<p><strong>Reason for rejection:</strong> ${afterData.rejectionReason}</p>` : ''}<p>You can view the details by logging into the HR Portal.</p>`,
     };
 
     try {
@@ -117,17 +103,12 @@ exports.onLeaveRequestUpdate = onDocumentUpdated({
     }
 });
 
-/**
- * Scheduled function that runs on December 31st to reset leave balances.
- */
 exports.resetAnnualLeaveBalances = onSchedule({
     schedule: "0 0 31 12 *",
     timeZone: "Asia/Colombo",
     region: "asia-southeast1"
 }, async (event) => {
-    // ... (rest of the function code is the same)
     console.log('Starting annual leave balance reset...');
-    
     try {
         const usersSnapshot = await db.collection('users').get();
         const batch = db.batch();
@@ -136,29 +117,20 @@ exports.resetAnnualLeaveBalances = onSchedule({
         usersSnapshot.forEach(doc => {
             const userData = doc.data();
             const userRef = db.collection('users').doc(doc.id);
-            
             const resetBalances = {
-                annualLeave: 14,
-                sickLeave: 7,
-                casualLeave: 7,
-                'leave in-lieu': 0,
-                shortLeave: 12,
-                other: 0
+                annualLeave: 14, sickLeave: 7, casualLeave: 7, 'leave in-lieu': 0, shortLeave: 12, other: 0
             };
-            
             if (userData.gender === 'female') {
                 resetBalances.maternityLeave = 84;
             } else if (userData.gender === 'male') {
                 resetBalances.paternityLeave = 3;
             }
-            
             batch.update(userRef, { leaveBalance: resetBalances });
             updateCount++;
         });
         
         await batch.commit();
         console.log(`Successfully reset leave balances for ${updateCount} users`);
-        
     } catch (error) {
         console.error('Error resetting annual leave balances:', error);
     }

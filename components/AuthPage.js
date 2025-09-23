@@ -66,7 +66,7 @@ export default function AuthPage({ title }) {
     <div className="w-full max-w-md">
       <div className="text-center mb-8">
         <img
-          className="mx-auto h-12 w-auto"
+          className="mx-auto h-24 w-auto"
           src="https://aibs.edu.lk/wp-content/uploads/2025/05/Approved-AIBS-Logo-PNG-white.png"
           alt="Company Logo"
         />

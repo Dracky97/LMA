@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "firebase": "^12.1.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^3.0.3",
     "next": "15.4.6",
     "nodemailer": "^7.0.6",
     "react": "19.1.0",

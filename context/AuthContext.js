@@ -73,14 +73,14 @@ export const AuthProvider = ({ children }) => {
         };
     }, [auth, db]);
 
-    const signup = async (name, email, password, department, managerId, employeeNumber = null, gender = null, designation = null, birthday = null) => {
+    const signup = async (name, email, password, department, managerId, employeeNumber = null, gender = null, designation = null, birthday = null, employeeStatus = 'probation', joinedDate = null) => {
         try {
             const userCredential = await createUserWithEmailAndPassword(auth, email, password);
             const newUser = userCredential.user;
             // Calculate prorated annual leave based on start date
             const currentDate = new Date();
             const currentMonth = currentDate.getMonth(); // 0-11 (Jan-Dec)
-            
+
             // Prorated annual leave based on quarter
             let annualLeave = 14; // Default for Jan-Mar
             if (currentMonth >= 3 && currentMonth <= 5) { // Apr-Jun
@@ -90,7 +90,7 @@ export const AuthProvider = ({ children }) => {
             } else if (currentMonth >= 9) { // Oct-Dec
                 annualLeave = 4;
             }
-            
+
             // Set gender-specific leave balances
             let leaveBalance = {
                 annualLeave,
@@ -100,14 +100,18 @@ export const AuthProvider = ({ children }) => {
                 shortLeave: 12,
                 other: 0
             };
-            
+
             if (gender === 'female') {
                 // Default maternity leave for first and second child
                 leaveBalance = { ...leaveBalance, maternityLeave: 84 };
             } else if (gender === 'male') {
                 leaveBalance = { ...leaveBalance, paternityLeave: 3 };
             }
-            
+
+            // Calculate next performance evaluation date (every 3 months from joined date)
+            const evaluationDate = joinedDate ? new Date(joinedDate) : currentDate;
+            evaluationDate.setMonth(evaluationDate.getMonth() + 3);
+
             return await setDoc(doc(db, 'users', newUser.uid), {
                 name,
                 email,
@@ -118,6 +122,9 @@ export const AuthProvider = ({ children }) => {
                 employeeNumber, // Add employee number field
                 gender, // Add gender field
                 designation, // Add designation field
+                employeeStatus, // Add employee status field (permanent/probation/intern)
+                joinedDate: joinedDate || currentDate.toISOString(), // Add joined date field
+                nextEvaluationDate: evaluationDate.toISOString(), // Add next evaluation date
                 personalDetails: { phone: '', address: '', dob: birthday || '' },
                 education: [],
                 qualifications: [],

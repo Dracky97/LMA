@@ -113,6 +113,14 @@ export default function ProfilePage() {
                                     <p className="text-sm text-slate-400">Employee Number</p>
                                     <p className="text-slate-200">{profileData.employeeNumber || 'Not provided'}</p>
                                 </div>
+                                <div>
+                                    <p className="text-sm text-slate-400">Employee Status</p>
+                                    <p className="text-slate-200 capitalize">{profileData.employeeStatus || 'Not set'}</p>
+                                </div>
+                                <div>
+                                    <p className="text-sm text-slate-400">Joined Date</p>
+                                    <p className="text-slate-200">{profileData.joinedDate ? new Date(profileData.joinedDate).toLocaleDateString() : 'Not set'}</p>
+                                </div>
                                 {profileData.designation && (
                                     <div>
                                         <p className="text-sm text-slate-400">Designation</p>
@@ -149,6 +157,31 @@ export default function ProfilePage() {
 
                     {/* Right Column - Education and Qualifications */}
                     <div className="lg:col-span-2 space-y-6">
+                        {/* Performance Evaluation Section */}
+                        <div className="bg-muted p-6 rounded-lg">
+                            <h3 className="text-lg font-semibold text-slate-200 mb-4">Performance Evaluation</h3>
+                            {profileData.nextEvaluationDate ? (
+                                <div className="space-y-3">
+                                    <div>
+                                        <p className="text-sm text-slate-400">Next Evaluation</p>
+                                        <p className="text-slate-200">{new Date(profileData.nextEvaluationDate).toLocaleDateString()}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-slate-400">Days Until Next Evaluation</p>
+                                        <p className="text-2xl font-bold text-blue-400">
+                                            {Math.max(0, Math.ceil((new Date(profileData.nextEvaluationDate) - new Date()) / (1000 * 60 * 60 * 24)))}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-slate-400">Employee Status</p>
+                                        <p className="text-slate-200 capitalize">{profileData.employeeStatus || 'Not set'}</p>
+                                    </div>
+                                </div>
+                            ) : (
+                                <p className="text-slate-500">No evaluation schedule set.</p>
+                            )}
+                        </div>
+
                         {/* Education Section */}
                         <div className="bg-muted p-6 rounded-lg">
                             <div className="flex justify-between items-center mb-4">

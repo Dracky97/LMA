@@ -113,7 +113,7 @@ exports.resetAnnualLeaveBalances = onSchedule({
         const usersSnapshot = await db.collection('users').get();
         const batch = db.batch();
         let updateCount = 0;
-        
+
         usersSnapshot.forEach(doc => {
             const userData = doc.data();
             const userRef = db.collection('users').doc(doc.id);
@@ -128,10 +128,153 @@ exports.resetAnnualLeaveBalances = onSchedule({
             batch.update(userRef, { leaveBalance: resetBalances });
             updateCount++;
         });
-        
+
         await batch.commit();
         console.log(`Successfully reset leave balances for ${updateCount} users`);
     } catch (error) {
         console.error('Error resetting annual leave balances:', error);
     }
 });
+
+// Function to send performance evaluation reminders
+exports.sendPerformanceEvaluationReminders = onSchedule({
+    schedule: "0 9 * * *", // Daily at 9 AM
+    timeZone: "Asia/Colombo",
+    region: "asia-southeast1"
+}, async (event) => {
+    console.log('Starting performance evaluation reminder check...');
+    try {
+        const usersSnapshot = await db.collection('users').where('role', '==', 'Employee').get();
+        const today = new Date();
+        const threeDaysFromNow = new Date(today);
+        threeDaysFromNow.setDate(today.getDate() + 3);
+
+        let reminderCount = 0;
+
+        for (const doc of usersSnapshot.docs) {
+            const userData = doc.data();
+
+            // Check if user has a next evaluation date
+            if (userData.nextEvaluationDate) {
+                const nextEvaluationDate = new Date(userData.nextEvaluationDate);
+
+                // Check if evaluation is exactly 3 days from now
+                if (nextEvaluationDate.toDateString() === threeDaysFromNow.toDateString()) {
+                    // Send reminder email to user
+                    await sendEvaluationReminder(userData, 'employee');
+
+                    // Send reminder email to HR managers
+                    const hrManagersSnapshot = await db.collection('users')
+                        .where('role', '==', 'Manager HR')
+                        .get();
+
+                    for (const hrDoc of hrManagersSnapshot.docs) {
+                        const hrData = hrDoc.data();
+                        await sendEvaluationReminder(userData, 'hr', hrData);
+                    }
+
+                    reminderCount++;
+                }
+            }
+        }
+
+        console.log(`Sent ${reminderCount} performance evaluation reminders`);
+    } catch (error) {
+        console.error('Error sending performance evaluation reminders:', error);
+    }
+});
+
+// Function to update evaluation dates after evaluation
+exports.onPerformanceEvaluationComplete = onDocumentUpdated({
+    document: "users/{userId}",
+    region: "asia-southeast1"
+}, async (event) => {
+    const change = event.data;
+    if (!change) {
+        console.log("No data associated with the event");
+        return;
+    }
+
+    const beforeData = change.before.data();
+    const afterData = change.after.data();
+
+    // Check if employee status was changed (indicating evaluation completion)
+    if (beforeData.employeeStatus !== afterData.employeeStatus) {
+        const userRef = db.collection('users').doc(afterData.uid || event.params.userId);
+
+        // Calculate next evaluation date (3 months from now)
+        const nextEvaluationDate = new Date();
+        nextEvaluationDate.setMonth(nextEvaluationDate.getMonth() + 3);
+
+        await userRef.update({
+            nextEvaluationDate: nextEvaluationDate.toISOString(),
+            lastEvaluationDate: new Date().toISOString()
+        });
+
+        console.log(`Updated evaluation schedule for user ${afterData.name}`);
+    }
+});
+
+// Helper function to send evaluation reminder emails
+async function sendEvaluationReminder(userData, recipientType, hrData = null) {
+    const transporter = nodemailer.createTransporter({
+        host: "mail.aibs.edu.lk",
+        port: 465,
+        secure: true,
+        auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS
+        }
+    });
+
+    let mailOptions;
+    let subject;
+    let recipientEmail;
+    let recipientName;
+
+    if (recipientType === 'employee') {
+        subject = 'Performance Evaluation Reminder - 3 Days';
+        recipientEmail = userData.email;
+        recipientName = userData.name;
+        mailOptions = {
+            from: '"HRMS Portal" <hrms@aibs.edu.lk>',
+            to: recipientEmail,
+            subject: subject,
+            html: `
+                <p>Hello ${recipientName},</p>
+                <p>This is a reminder that your performance evaluation is scheduled for <strong>${new Date(userData.nextEvaluationDate).toLocaleDateString()}</strong> (3 days from now).</p>
+                <p>Please prepare any relevant documentation or feedback you would like to discuss during your evaluation.</p>
+                <p>If you have any questions, please contact your HR manager.</p>
+                <p>Best regards,<br/>HRMS Team</p>
+            `
+        };
+    } else if (recipientType === 'hr' && hrData) {
+        subject = `Performance Evaluation Reminder - ${userData.name}`;
+        recipientEmail = hrData.email;
+        recipientName = hrData.name;
+        mailOptions = {
+            from: '"HRMS Portal" <hrms@aibs.edu.lk>',
+            to: recipientEmail,
+            subject: subject,
+            html: `
+                <p>Hello ${recipientName},</p>
+                <p>This is a reminder that <strong>${userData.name}</strong>'s performance evaluation is scheduled for <strong>${new Date(userData.nextEvaluationDate).toLocaleDateString()}</strong> (3 days from now).</p>
+                <p><strong>Employee Details:</strong></p>
+                <ul>
+                    <li>Department: ${userData.department}</li>
+                    <li>Current Status: ${userData.employeeStatus}</li>
+                    <li>Joined Date: ${userData.joinedDate ? new Date(userData.joinedDate).toLocaleDateString() : 'Not set'}</li>
+                </ul>
+                <p>Please ensure the evaluation is conducted on time and update the employee's status if necessary.</p>
+                <p>Best regards,<br/>HRMS Team</p>
+            `
+        };
+    }
+
+    try {
+        await transporter.sendMail(mailOptions);
+        console.log(`Evaluation reminder sent to ${recipientType}: ${recipientEmail}`);
+    } catch (error) {
+        console.error(`Error sending evaluation reminder to ${recipientType}:`, error);
+    }
+}

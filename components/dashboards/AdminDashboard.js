@@ -25,7 +25,9 @@ export default function AdminDashboard() {
         employeeNumber: '',
         gender: '',
         designation: '',
-        birthday: ''
+        birthday: '',
+        employeeStatus: 'probation',
+        joinedDate: ''
     });
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
@@ -37,8 +39,16 @@ export default function AdminDashboard() {
     const [editingUser, setEditingUser] = useState(null);
     const [showEditModal, setShowEditModal] = useState(false);
     const [editUserData, setEditUserData] = useState({});
+    const [showStatusChangeModal, setShowStatusChangeModal] = useState(false);
+    const [statusChangeUser, setStatusChangeUser] = useState(null);
+    const [newStatus, setNewStatus] = useState('');
+    const [statusChangeReason, setStatusChangeReason] = useState('');
+    const [showJoinedDateModal, setShowJoinedDateModal] = useState(false);
+    const [joinedDateUser, setJoinedDateUser] = useState(null);
+    const [newJoinedDate, setNewJoinedDate] = useState('');
+    const [joinedDateReason, setJoinedDateReason] = useState('');
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
-    const { signup } = useAuth();
+    const { signup, userData: currentUserData } = useAuth();
 
     const roleOptions = [
         'Employee',
@@ -133,6 +143,79 @@ export default function AdminDashboard() {
         }
     };
 
+    const openStatusChangeModal = (user) => {
+        setStatusChangeUser(user);
+        setNewStatus(user.employeeStatus || 'probation');
+        setStatusChangeReason('');
+        setShowStatusChangeModal(true);
+    };
+
+    const handleStatusChange = async () => {
+        if (!statusChangeUser || !newStatus) {
+            setError('Please select a new status');
+            return;
+        }
+
+        try {
+            const userDocRef = doc(db, 'users', statusChangeUser.id);
+            await updateDoc(userDocRef, {
+                employeeStatus: newStatus,
+                statusChangeReason: statusChangeReason,
+                statusChangedAt: new Date().toISOString(),
+                statusChangedBy: currentUserData?.uid || 'admin'
+            });
+
+            setSuccess(`Employee status updated to ${newStatus} for ${statusChangeUser.name}`);
+            setShowStatusChangeModal(false);
+            setStatusChangeUser(null);
+            setNewStatus('');
+            setStatusChangeReason('');
+        } catch (error) {
+            console.error('Error updating employee status:', error);
+            setError('Failed to update employee status: ' + error.message);
+        }
+    };
+
+    const openJoinedDateModal = (user) => {
+        setJoinedDateUser(user);
+        setNewJoinedDate(user.joinedDate ? new Date(user.joinedDate).toISOString().split('T')[0] : '');
+        setJoinedDateReason('');
+        setShowJoinedDateModal(true);
+    };
+
+    const handleJoinedDateChange = async () => {
+        if (!joinedDateUser || !newJoinedDate) {
+            setError('Please select a new joined date');
+            return;
+        }
+
+        try {
+            const userDocRef = doc(db, 'users', joinedDateUser.id);
+            const joinedDateObj = new Date(newJoinedDate);
+
+            // Calculate new next evaluation date (3 months from new joined date)
+            const nextEvaluationDate = new Date(joinedDateObj);
+            nextEvaluationDate.setMonth(nextEvaluationDate.getMonth() + 3);
+
+            await updateDoc(userDocRef, {
+                joinedDate: joinedDateObj.toISOString(),
+                nextEvaluationDate: nextEvaluationDate.toISOString(),
+                joinedDateChangeReason: joinedDateReason,
+                joinedDateChangedAt: new Date().toISOString(),
+                joinedDateChangedBy: currentUserData?.uid || 'admin'
+            });
+
+            setSuccess(`Joined date updated to ${newJoinedDate} for ${joinedDateUser.name}`);
+            setShowJoinedDateModal(false);
+            setJoinedDateUser(null);
+            setNewJoinedDate('');
+            setJoinedDateReason('');
+        } catch (error) {
+            console.error('Error updating joined date:', error);
+            setError('Failed to update joined date: ' + error.message);
+        }
+    };
+
     const handleDeleteUser = async (userId) => {
         try {
             // Delete user document from Firestore
@@ -199,10 +282,18 @@ export default function AdminDashboard() {
         try {
             const userDocRef = doc(db, 'users', editingUser.id);
             const updateData = { ...editUserData };
-            
+
             // Update isManager flag based on role
             updateData.isManager = (updateData.role !== 'Employee');
-            
+
+            // If joined date was changed, recalculate next evaluation date
+            if (editUserData.joinedDate && editUserData.joinedDate !== editingUser.joinedDate) {
+                const joinedDateObj = new Date(editUserData.joinedDate);
+                const nextEvaluationDate = new Date(joinedDateObj);
+                nextEvaluationDate.setMonth(nextEvaluationDate.getMonth() + 3);
+                updateData.nextEvaluationDate = nextEvaluationDate.toISOString();
+            }
+
             await updateDoc(userDocRef, updateData);
             setSuccess('User updated successfully');
             setShowEditModal(false);
@@ -236,7 +327,9 @@ export default function AdminDashboard() {
                 newUser.employeeNumber || null,
                 newUser.gender || null,
                 newUser.designation || null,
-                newUser.birthday || null
+                newUser.birthday || null,
+                newUser.employeeStatus || 'probation',
+                newUser.joinedDate || null
             );
             setSuccess('User added successfully!');
             // Reset form
@@ -249,7 +342,9 @@ export default function AdminDashboard() {
                 employeeNumber: '',
                 gender: '',
                 designation: '',
-                birthday: ''
+                birthday: '',
+                employeeStatus: 'probation',
+                joinedDate: ''
             });
             // Close the form after a short delay
             setTimeout(() => {
@@ -627,7 +722,33 @@ export default function AdminDashboard() {
                                         className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
                                     />
                                 </div>
-                                
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Employee Status</label>
+                                    <select
+                                        name="employeeStatus"
+                                        value={newUser.employeeStatus}
+                                        onChange={handleAddUserChange}
+                                        required
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    >
+                                        <option value="permanent">Permanent</option>
+                                        <option value="probation">Probation</option>
+                                        <option value="intern">Intern</option>
+                                    </select>
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Joined Date</label>
+                                    <input
+                                        type="date"
+                                        name="joinedDate"
+                                        value={newUser.joinedDate}
+                                        onChange={handleAddUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    />
+                                </div>
+
                                 <div className="flex justify-end space-x-3">
                                     <button
                                         type="button"
@@ -890,6 +1011,17 @@ export default function AdminDashboard() {
                                             className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
                                         />
                                     </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-300 mb-1">Joined Date</label>
+                                        <input
+                                            type="date"
+                                            name="joinedDate"
+                                            value={editUserData.joinedDate ? new Date(editUserData.joinedDate).toISOString().split('T')[0] : ''}
+                                            onChange={handleEditUserChange}
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                    </div>
                                     
                                     <h4 className="text-md font-semibold text-slate-300 mt-6">Leave Balance</h4>
                                     
@@ -939,6 +1071,187 @@ export default function AdminDashboard() {
                                     className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-150 ease-in-out"
                                 >
                                     Save Changes
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Status Change Modal */}
+            {showStatusChangeModal && statusChangeUser && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md">
+                        <div className="p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-medium text-slate-200">Change Employee Status</h3>
+                                <button
+                                    onClick={() => {
+                                        setShowStatusChangeModal(false);
+                                        setStatusChangeUser(null);
+                                        setNewStatus('');
+                                        setStatusChangeReason('');
+                                        setError('');
+                                    }}
+                                    className="text-slate-400 hover:text-slate-200"
+                                >
+                                    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <div className="mb-4">
+                                <p className="text-sm text-slate-300 mb-2">
+                                    <strong>Employee:</strong> {statusChangeUser.name}
+                                </p>
+                                <p className="text-sm text-slate-300 mb-4">
+                                    <strong>Current Status:</strong> <span className="capitalize">{statusChangeUser.employeeStatus || 'Not set'}</span>
+                                </p>
+                            </div>
+
+                            {error && (
+                                <div className="mb-4 p-3 bg-red-900/30 text-red-300 rounded-md text-sm">
+                                    {error}
+                                </div>
+                            )}
+
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium text-slate-300 mb-2">New Status</label>
+                                <select
+                                    value={newStatus}
+                                    onChange={(e) => setNewStatus(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                >
+                                    <option value="">Select New Status</option>
+                                    <option value="permanent">Permanent</option>
+                                    <option value="probation">Probation</option>
+                                    <option value="intern">Intern</option>
+                                </select>
+                            </div>
+
+                            <div className="mb-6">
+                                <label className="block text-sm font-medium text-slate-300 mb-2">Reason for Change (Optional)</label>
+                                <textarea
+                                    value={statusChangeReason}
+                                    onChange={(e) => setStatusChangeReason(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    rows="3"
+                                    placeholder="Enter reason for status change..."
+                                />
+                            </div>
+
+                            <div className="flex justify-end space-x-3">
+                                <button
+                                    onClick={() => {
+                                        setShowStatusChangeModal(false);
+                                        setStatusChangeUser(null);
+                                        setNewStatus('');
+                                        setStatusChangeReason('');
+                                        setError('');
+                                    }}
+                                    className="px-4 py-2 border border-gray-600 text-slate-300 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 transition duration-150 ease-in-out"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleStatusChange}
+                                    className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition duration-150 ease-in-out"
+                                >
+                                    Update Status
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Joined Date Change Modal */}
+            {showJoinedDateModal && joinedDateUser && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md">
+                        <div className="p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-medium text-slate-200">Change Joined Date</h3>
+                                <button
+                                    onClick={() => {
+                                        setShowJoinedDateModal(false);
+                                        setJoinedDateUser(null);
+                                        setNewJoinedDate('');
+                                        setJoinedDateReason('');
+                                        setError('');
+                                    }}
+                                    className="text-slate-400 hover:text-slate-200"
+                                >
+                                    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <div className="mb-4">
+                                <p className="text-sm text-slate-300 mb-2">
+                                    <strong>Employee:</strong> {joinedDateUser.name}
+                                </p>
+                                <p className="text-sm text-slate-300 mb-4">
+                                    <strong>Current Joined Date:</strong> {joinedDateUser.joinedDate ? new Date(joinedDateUser.joinedDate).toLocaleDateString() : 'Not set'}
+                                </p>
+                                <p className="text-sm text-slate-300 mb-4">
+                                    <strong>Current Next Evaluation:</strong> {joinedDateUser.nextEvaluationDate ? new Date(joinedDateUser.nextEvaluationDate).toLocaleDateString() : 'Not set'}
+                                </p>
+                            </div>
+
+                            {error && (
+                                <div className="mb-4 p-3 bg-red-900/30 text-red-300 rounded-md text-sm">
+                                    {error}
+                                </div>
+                            )}
+
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium text-slate-300 mb-2">New Joined Date</label>
+                                <input
+                                    type="date"
+                                    value={newJoinedDate}
+                                    onChange={(e) => setNewJoinedDate(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                />
+                            </div>
+
+                            <div className="mb-6">
+                                <label className="block text-sm font-medium text-slate-300 mb-2">Reason for Change (Optional)</label>
+                                <textarea
+                                    value={joinedDateReason}
+                                    onChange={(e) => setJoinedDateReason(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    rows="3"
+                                    placeholder="Enter reason for joined date change..."
+                                />
+                            </div>
+
+                            <div className="bg-yellow-900/30 border border-yellow-600 rounded-md p-3 mb-4">
+                                <p className="text-sm text-yellow-300">
+                                    <strong>Note:</strong> Changing the joined date will automatically recalculate the next performance evaluation date (3 months from new joined date).
+                                </p>
+                            </div>
+
+                            <div className="flex justify-end space-x-3">
+                                <button
+                                    onClick={() => {
+                                        setShowJoinedDateModal(false);
+                                        setJoinedDateUser(null);
+                                        setNewJoinedDate('');
+                                        setJoinedDateReason('');
+                                        setError('');
+                                    }}
+                                    className="px-4 py-2 border border-gray-600 text-slate-300 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 transition duration-150 ease-in-out"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleJoinedDateChange}
+                                    className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 transition duration-150 ease-in-out"
+                                >
+                                    Update Joined Date
                                 </button>
                             </div>
                         </div>
@@ -1034,6 +1347,24 @@ export default function AdminDashboard() {
                                         >
                                             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            onClick={() => openStatusChangeModal(user)}
+                                            className="text-green-400 hover:text-green-300 text-xs"
+                                            title="Change Status"
+                                        >
+                                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            onClick={() => openJoinedDateModal(user)}
+                                            className="text-purple-400 hover:text-purple-300 text-xs"
+                                            title="Change Joined Date"
+                                        >
+                                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                             </svg>
                                         </button>
                                         {user.role !== 'Admin' && (

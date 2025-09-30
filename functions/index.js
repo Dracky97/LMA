@@ -1,5 +1,6 @@
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onRequest } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const nodemailer = require("nodemailer");
 
@@ -312,3 +313,18 @@ async function sendEvaluationReminder(userData, recipientType, hrData = null) {
         console.error(`Error sending evaluation reminder to ${recipientType}:`, error);
     }
 }
+
+// API function to handle Next.js API routes
+exports.api = onRequest({
+    region: "asia-southeast1",
+    cors: true
+}, async (req, res) => {
+    // Handle API routes that were in pages/api/
+    if (req.path === "/api/hello") {
+        res.status(200).json({ name: "John Doe" });
+        return;
+    }
+
+    // Default response for unmatched routes
+    res.status(404).json({ error: "Not Found" });
+});

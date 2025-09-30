@@ -10,7 +10,7 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 
 export default function EditProfilePage() {
-    const { userData, changePassword } = useAuth();
+    const { user, userData, changePassword } = useAuth();
     const router = useRouter();
     const [formData, setFormData] = useState(null);
     const [profileImage, setProfileImage] = useState(null);
@@ -20,11 +20,7 @@ export default function EditProfilePage() {
     const [isUploading, setIsUploading] = useState(false);
     const [errors, setErrors] = useState({});
     const [showPasswordSection, setShowPasswordSection] = useState(false);
-    const [passwordData, setPasswordData] = useState({
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: ''
-    });
+    // Password reset state (simplified)
     const [passwordLoading, setPasswordLoading] = useState(false);
     const [passwordSuccess, setPasswordSuccess] = useState('');
 
@@ -268,48 +264,30 @@ export default function EditProfilePage() {
         }
     };
 
-    const handlePasswordChange = (e) => {
-        const { name, value } = e.target;
-        setPasswordData(prev => ({
-            ...prev,
-            [name]: value
-        }));
-        // Clear password errors when user starts typing
-        if (errors.password) {
-            setErrors(prev => ({ ...prev, password: null }));
-        }
-    };
 
-    const handlePasswordSubmit = async (e) => {
-        e.preventDefault();
+    const handlePasswordReset = async () => {
+        if (!userData?.email) {
+            setErrors(prev => ({ ...prev, password: 'No email address found' }));
+            return;
+        }
+
+        setPasswordLoading(true);
         setErrors(prev => ({ ...prev, password: null }));
         setPasswordSuccess('');
-        
-        // Validate passwords
-        if (passwordData.newPassword !== passwordData.confirmPassword) {
-            setErrors(prev => ({ ...prev, password: 'New passwords do not match' }));
-            return;
-        }
-        
-        if (passwordData.newPassword.length < 6) {
-            setErrors(prev => ({ ...prev, password: 'New password must be at least 6 characters long' }));
-            return;
-        }
-        
-        setPasswordLoading(true);
-        
+
         try {
-            await changePassword(passwordData.currentPassword, passwordData.newPassword);
-            setPasswordSuccess('Password updated successfully!');
-            // Reset form
-            setPasswordData({
-                currentPassword: '',
-                newPassword: '',
-                confirmPassword: ''
-            });
-            // Hide success message after 3 seconds
-            setTimeout(() => setPasswordSuccess(''), 3000);
+            console.log('Sending password reset email to:', userData.email);
+            const result = await changePassword(); // Call without parameters for email reset
+
+            if (result.success) {
+                setPasswordSuccess('Password reset link has been sent to your email address. Please check your email and follow the instructions to reset your password.');
+                // Hide success message after 10 seconds (longer for email instructions)
+                setTimeout(() => setPasswordSuccess(''), 10000);
+            } else {
+                setErrors(prev => ({ ...prev, password: result.message || 'Failed to send password reset email' }));
+            }
         } catch (error) {
+            console.error('Password reset error:', error);
             setErrors(prev => ({ ...prev, password: error.message }));
         } finally {
             setPasswordLoading(false);
@@ -454,19 +432,22 @@ export default function EditProfilePage() {
                                 />
                             </div>
                             
-                            <div>
-                                <label className="block text-sm font-medium text-slate-300 mb-1">Gender</label>
-                                <select
-                                    name="gender"
-                                    value={formData.gender || ''}
-                                    onChange={(e) => setFormData({...formData, gender: e.target.value})}
-                                    className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                >
-                                    <option value="">Select Gender</option>
-                                    <option value="male">Male</option>
-                                    <option value="female">Female</option>
-                                </select>
-                            </div>
+                            {/* Gender field - only visible to Admin/HR Manager */}
+                            {(userData?.role === 'Admin' || userData?.role === 'HR Manager' || userData?.role?.includes('Manager HR')) && (
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Gender</label>
+                                    <select
+                                        name="gender"
+                                        value={formData.gender || ''}
+                                        onChange={(e) => setFormData({...formData, gender: e.target.value})}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                        <option value="">Select Gender</option>
+                                        <option value="male">Male</option>
+                                        <option value="female">Female</option>
+                                    </select>
+                                </div>
+                            )}
                             
                             <div>
                                 <label className="block text-sm font-medium text-slate-300 mb-1">Phone Number</label>
@@ -671,68 +652,41 @@ export default function EditProfilePage() {
                         </div>
                         
                         {showPasswordSection && (
-                            <form onSubmit={handlePasswordSubmit} className="space-y-4">
+                            <div className="space-y-4">
                                 {errors.password && (
                                     <div className="bg-red-900/20 border border-red-500/50 rounded-md p-3">
                                         <p className="text-red-400 text-sm">{errors.password}</p>
                                     </div>
                                 )}
-                                
+
                                 {passwordSuccess && (
                                     <div className="bg-green-900/20 border border-green-500/50 rounded-md p-3">
                                         <p className="text-green-400 text-sm">{passwordSuccess}</p>
                                     </div>
                                 )}
-                                
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-1">Current Password</label>
-                                    <input
-                                        type="password"
-                                        name="currentPassword"
-                                        value={passwordData.currentPassword}
-                                        onChange={handlePasswordChange}
-                                        required
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        placeholder="Enter your current password"
-                                    />
+
+                                <div className="bg-blue-900/20 border border-blue-500/50 rounded-md p-4">
+                                    <div className="flex items-start space-x-3">
+                                        <div className="flex-shrink-0">
+                                            <svg className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                            </svg>
+                                        </div>
+                                        <div>
+                                            <h3 className="text-sm font-medium text-blue-300">Password Reset via Email</h3>
+                                            <p className="text-sm text-blue-200 mt-1">
+                                                A password reset link will be sent to <strong>{userData?.email}</strong>.
+                                                Click the link in your email to set a new password.
+                                            </p>
+                                        </div>
+                                    </div>
                                 </div>
-                                
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-1">New Password</label>
-                                    <input
-                                        type="password"
-                                        name="newPassword"
-                                        value={passwordData.newPassword}
-                                        onChange={handlePasswordChange}
-                                        required
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        placeholder="Enter new password (min. 6 characters)"
-                                    />
-                                </div>
-                                
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-1">Confirm New Password</label>
-                                    <input
-                                        type="password"
-                                        name="confirmPassword"
-                                        value={passwordData.confirmPassword}
-                                        onChange={handlePasswordChange}
-                                        required
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        placeholder="Confirm new password"
-                                    />
-                                </div>
-                                
+
                                 <div className="flex justify-end space-x-3">
                                     <button
                                         type="button"
                                         onClick={() => {
                                             setShowPasswordSection(false);
-                                            setPasswordData({
-                                                currentPassword: '',
-                                                newPassword: '',
-                                                confirmPassword: ''
-                                            });
                                             setErrors(prev => ({ ...prev, password: null }));
                                             setPasswordSuccess('');
                                         }}
@@ -741,12 +695,12 @@ export default function EditProfilePage() {
                                         Cancel
                                     </button>
                                     <button
-                                        type="submit"
+                                        onClick={handlePasswordReset}
                                         disabled={passwordLoading}
-                                        className={`px-4 py-2 rounded-md font-medium focus:outline-none focus:ring-2 focus:ring-yellow-500 transition duration-150 ease-in-out ${
+                                        className={`px-4 py-2 rounded-md font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-150 ease-in-out ${
                                             passwordLoading
                                                 ? 'bg-gray-400 cursor-not-allowed'
-                                                : 'bg-yellow-600 hover:bg-yellow-700 text-white'
+                                                : 'bg-blue-600 hover:bg-blue-700 text-white'
                                         }`}
                                     >
                                         {passwordLoading ? (
@@ -755,14 +709,14 @@ export default function EditProfilePage() {
                                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                                 </svg>
-                                                Updating...
+                                                Sending...
                                             </div>
                                         ) : (
-                                            'Update Password'
+                                            'Send Reset Email'
                                         )}
                                     </button>
                                 </div>
-                            </form>
+                            </div>
                         )}
                     </div>
                     

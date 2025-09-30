@@ -17,8 +17,73 @@ export default function LeaveRequestModal({ userData, onClose }) {
     const [totalHours, setTotalHours] = useState(0);
     const [leaveUnits, setLeaveUnits] = useState(0);
 
+    // New state for granular date selection
+    const [useGranularSelection, setUseGranularSelection] = useState(false);
+    const [dateConfigurations, setDateConfigurations] = useState({});
+
     // Filter leave types based on user's gender using shared configuration
     const filteredLeaveTypes = getFilteredLeaveTypes(userData.gender);
+
+    // Generate array of dates between start and end date
+    const getDatesInRange = (start, end) => {
+        const dates = [];
+        const currentDate = new Date(start);
+        const endDate = new Date(end);
+
+        while (currentDate <= endDate) {
+            const dateStr = currentDate.toISOString().split('T')[0];
+            dates.push(dateStr);
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+
+        return dates;
+    };
+
+    // Get all dates in the selected range
+    const selectedDates = startDate && endDate ? getDatesInRange(startDate, endDate) : [];
+
+    // Handle date configuration change
+    const handleDateConfigurationChange = (date, configuration) => {
+        setDateConfigurations(prev => ({
+            ...prev,
+            [date]: configuration
+        }));
+    };
+
+    // Calculate total leave units from granular selections
+    const calculateGranularLeaveUnits = () => {
+        let totalUnits = 0;
+
+        selectedDates.forEach(date => {
+            const config = dateConfigurations[date];
+            if (config) {
+                const { type: dayType, startTime: dayStartTime, endTime: dayEndTime } = config;
+
+                if (dayType === 'full') {
+                    totalUnits += 1;
+                } else if (dayType === 'half') {
+                    totalUnits += 0.5;
+                } else if (dayType === 'short' && dayStartTime && dayEndTime) {
+                    const [startHour, startMin] = dayStartTime.split(':').map(Number);
+                    const [endHour, endMin] = dayEndTime.split(':').map(Number);
+                    const startMinutes = startHour * 60 + startMin;
+                    const endMinutes = endHour * 60 + endMin;
+                    const hours = (endMinutes - startMinutes) / 60;
+
+                    if (hours < 1.5) {
+                        totalUnits += 0; // Short leave, no deduction
+                    } else {
+                        totalUnits += 0.5; // Half day
+                    }
+                }
+            } else {
+                // Default to full day if no configuration
+                totalUnits += 1;
+            }
+        });
+
+        return totalUnits;
+    };
 
     // Calculate total days with Saturday = 0.5 days, exclude Sundays
     useEffect(() => {
@@ -58,22 +123,45 @@ export default function LeaveRequestModal({ userData, onClose }) {
         if (startTime && endTime) {
             const [startHour, startMin] = startTime.split(':').map(Number);
             const [endHour, endMin] = endTime.split(':').map(Number);
-            
+
             const startMinutes = startHour * 60 + startMin;
             const endMinutes = endHour * 60 + endMin;
-            
+
             if (endMinutes > startMinutes) {
                 const diffMinutes = endMinutes - startMinutes;
                 const hours = Math.round((diffMinutes / 60) * 100) / 100; // Round to 2 decimal places
                 setTotalHours(hours);
-                
-                // Calculate leave units based on hours
+
+                // Updated leave calculation logic based on new requirements
                 let units = 0;
-                if (hours > 2 && hours < 4) {
-                    units = 0.5; // Half day
+
+                // Check if time range includes 12:30 PM (half day marker)
+                const startTimeStr = startTime; // e.g., "10:00"
+                const endTimeStr = endTime;     // e.g., "12:30"
+
+                // Check if either start or end time is 12:30 PM (half day boundary)
+                const isHalfDayStart = startTimeStr === "12:30";
+                const isHalfDayEnd = endTimeStr === "12:30";
+
+                if (isHalfDayStart || isHalfDayEnd) {
+                    // If start or end is 12:30 PM, it's a half day
+                    units = 0.5;
+                } else if (hours < 1.5) {
+                    // Less than 1.5 hours = short leave (no deduction)
+                    units = 0;
+                } else if (hours >= 1.5 && hours < 4) {
+                    // 1.5 to 4 hours = half day
+                    units = 0.5;
                 } else if (hours >= 4) {
-                    units = 1; // Full day
+                    // 4+ hours = full day
+                    units = 1;
                 }
+
+                // For multi-day requests, multiply by number of days if time selection is provided
+                if (totalDays > 1 && startTime && endTime) {
+                    units = units * totalDays;
+                }
+
                 setLeaveUnits(units);
             } else {
                 setTotalHours(0);
@@ -134,6 +222,20 @@ export default function LeaveRequestModal({ userData, onClose }) {
         }
 
         try {
+            let finalLeaveUnits;
+
+            if (useGranularSelection) {
+                // Use granular calculation
+                finalLeaveUnits = calculateGranularLeaveUnits();
+            } else {
+                // Use simple calculation
+                if (startTime && endTime) {
+                    finalLeaveUnits = leaveUnits;
+                } else {
+                    finalLeaveUnits = totalDays;
+                }
+            }
+
             const requestData = {
                 userId: userData.uid,
                 userName: userData.name,
@@ -146,20 +248,25 @@ export default function LeaveRequestModal({ userData, onClose }) {
                 status: 'Pending',
                 appliedOn: serverTimestamp(),
                 totalDays: totalDays,
+                leaveUnits: finalLeaveUnits,
+                isGranularSelection: useGranularSelection,
             };
-            
-            // Add time-based fields if provided
-            if (startTime && endTime) {
+
+            // Add granular configuration if used
+            if (useGranularSelection) {
+                requestData.dateConfigurations = dateConfigurations;
+            }
+
+            // Add time-based fields if provided (for simple mode)
+            if (!useGranularSelection && startTime && endTime) {
                 requestData.startTime = startTime;
                 requestData.endTime = endTime;
                 requestData.totalHours = totalHours;
-                requestData.leaveUnits = leaveUnits;
-                requestData.isPartialDay = leaveUnits < totalDays;
+                requestData.isPartialDay = finalLeaveUnits < totalDays;
             } else {
-                requestData.leaveUnits = totalDays;
-                requestData.isPartialDay = false;
+                requestData.isPartialDay = finalLeaveUnits < totalDays;
             }
-            
+
             await addDoc(collection(db, "leaveRequests"), requestData);
             onClose();
         } catch (err) {
@@ -189,6 +296,33 @@ export default function LeaveRequestModal({ userData, onClose }) {
                             </select>
                         </div>
 
+                        {/* Date Selection Mode Toggle */}
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium text-slate-300 mb-2">Leave Planning Mode</label>
+                            <div className="flex space-x-4">
+                                <label className="flex items-center">
+                                    <input
+                                        type="radio"
+                                        name="selectionMode"
+                                        checked={!useGranularSelection}
+                                        onChange={() => setUseGranularSelection(false)}
+                                        className="mr-2"
+                                    />
+                                    <span className="text-sm text-slate-300">Simple Range</span>
+                                </label>
+                                <label className="flex items-center">
+                                    <input
+                                        type="radio"
+                                        name="selectionMode"
+                                        checked={useGranularSelection}
+                                        onChange={() => setUseGranularSelection(true)}
+                                        className="mr-2"
+                                    />
+                                    <span className="text-sm text-slate-300">Detailed Planning</span>
+                                </label>
+                            </div>
+                        </div>
+
                         {/* Date Selection */}
                         <div className="mb-4">
                             <label className="block text-sm font-medium text-slate-300 mb-2">Date Range</label>
@@ -214,7 +348,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                     />
                                 </div>
                             </div>
-                            {totalDays > 0 && (
+                            {totalDays > 0 && !useGranularSelection && (
                                 <div className="mt-2 text-sm text-slate-300 bg-blue-900/20 p-2 rounded">
                                     <strong>Working Days: {totalDays}</strong>
                                     <div className="text-xs text-slate-400 mt-1">
@@ -224,75 +358,215 @@ export default function LeaveRequestModal({ userData, onClose }) {
                             )}
                         </div>
 
-                        {/* Time Selection */}
-                        <div className="mb-4">
-                            <label className="block text-sm font-medium text-slate-300 mb-2">Time Range (Optional)</label>
-                            
-                            {totalDays > 1 ? (
-                                <div className="text-sm text-slate-400 bg-gray-900/30 p-3 rounded">
-                                    Time range selection is disabled for multi-day leave requests.
-                                </div>
-                            ) : (
-                                <>
-                                    <div className="text-xs text-slate-400 mb-2">Business hours: 8:00 AM - 5:00 PM only</div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-xs text-slate-400 mb-1">From</label>
-                                            <input
-                                                type="time"
-                                                value={startTime}
-                                                onChange={(e) => setStartTime(e.target.value)}
-                                                min="08:00"
-                                                max="17:00"
-                                                step="1800"
-                                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs text-slate-400 mb-1">To</label>
-                                            <input
-                                                type="time"
-                                                value={endTime}
-                                                onChange={(e) => setEndTime(e.target.value)}
-                                                min="08:00"
-                                                max="17:00"
-                                                step="1800"
-                                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
-                                            />
-                                        </div>
-                                    </div>
-                                </>
-                            )}
-                            {totalHours > 0 && (
-                                <div className="mt-2 space-y-1">
-                                    <div className="text-sm text-slate-300 bg-green-900/20 p-2 rounded">
-                                        <strong>Total Hours: {totalHours}</strong>
-                                    </div>
-                                    {leaveUnits > 0 && (
-                                        <div className="text-sm text-slate-300 bg-purple-900/20 p-2 rounded">
-                                            <strong>
-                                                Leave Deduction: {leaveUnits} {leaveUnits === 0.5 ? 'half day' : leaveUnits === 1 ? 'full day' : 'days'}
-                                            </strong>
-                                            {totalHours > 2 && totalHours < 4 && (
-                                                <div className="text-xs text-slate-400 mt-1">
-                                                    (2-4 hours = half day)
+                        {/* Granular Date Selection */}
+                        {useGranularSelection && selectedDates.length > 0 && (
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium text-slate-300 mb-2">Configure Each Day</label>
+                                <div className="space-y-2 max-h-60 overflow-y-auto">
+                                    {selectedDates.map((date, index) => {
+                                        const dateObj = new Date(date);
+                                        const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
+                                        const config = dateConfigurations[date] || {};
+
+                                        return (
+                                            <div key={date} className="bg-muted p-3 rounded border border-gray-600">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <div>
+                                                        <strong className="text-slate-200">
+                                                            {dayName}, {dateObj.toLocaleDateString()}
+                                                        </strong>
+                                                    </div>
+                                                    <select
+                                                        value={config.type || 'full'}
+                                                        onChange={(e) => handleDateConfigurationChange(date, {
+                                                            ...config,
+                                                            type: e.target.value
+                                                        })}
+                                                        className="px-2 py-1 border border-gray-600 rounded text-xs bg-card text-slate-200"
+                                                    >
+                                                        <option value="full">Full Day</option>
+                                                        <option value="half">Half Day</option>
+                                                        <option value="short">Short Leave</option>
+                                                    </select>
                                                 </div>
-                                            )}
-                                            {totalHours >= 4 && (
-                                                <div className="text-xs text-slate-400 mt-1">
-                                                    (4+ hours = full day)
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                    {totalHours > 0 && totalHours <= 2 && (
-                                        <div className="text-sm text-yellow-300 bg-yellow-900/20 p-2 rounded">
-                                            <strong>No leave deduction for ≤2 hours</strong>
-                                        </div>
-                                    )}
+
+                                                {config.type === 'short' && (
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <div>
+                                                            <label className="block text-xs text-slate-400 mb-1">Start Time</label>
+                                                            <input
+                                                                type="time"
+                                                                value={config.startTime || ''}
+                                                                onChange={(e) => handleDateConfigurationChange(date, {
+                                                                    ...config,
+                                                                    startTime: e.target.value
+                                                                })}
+                                                                min="08:00"
+                                                                max="17:00"
+                                                                className="w-full px-2 py-1 border border-gray-600 rounded text-xs bg-card text-slate-200"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-xs text-slate-400 mb-1">End Time</label>
+                                                            <input
+                                                                type="time"
+                                                                value={config.endTime || ''}
+                                                                onChange={(e) => handleDateConfigurationChange(date, {
+                                                                    ...config,
+                                                                    endTime: e.target.value
+                                                                })}
+                                                                min="08:00"
+                                                                max="17:00"
+                                                                className="w-full px-2 py-1 border border-gray-600 rounded text-xs bg-card text-slate-200"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {config.type === 'half' && (
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <div>
+                                                            <label className="block text-xs text-slate-400 mb-1">Start Time</label>
+                                                            <input
+                                                                type="time"
+                                                                value={config.startTime || ''}
+                                                                onChange={(e) => handleDateConfigurationChange(date, {
+                                                                    ...config,
+                                                                    startTime: e.target.value
+                                                                })}
+                                                                min="08:00"
+                                                                max="17:00"
+                                                                className="w-full px-2 py-1 border border-gray-600 rounded text-xs bg-card text-slate-200"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-xs text-slate-400 mb-1">End Time</label>
+                                                            <input
+                                                                type="time"
+                                                                value={config.endTime || ''}
+                                                                onChange={(e) => handleDateConfigurationChange(date, {
+                                                                    ...config,
+                                                                    endTime: e.target.value
+                                                                })}
+                                                                min="08:00"
+                                                                max="17:00"
+                                                                className="w-full px-2 py-1 border border-gray-600 rounded text-xs bg-card text-slate-200"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
                                 </div>
-                            )}
-                        </div>
+
+                                {/* Granular Selection Summary */}
+                                <div className="mt-3 p-3 bg-green-900/20 border border-green-500/30 rounded">
+                                    <div className="text-sm text-green-300">
+                                        <strong>Total Leave Days: {calculateGranularLeaveUnits()}</strong>
+                                    </div>
+                                    <div className="text-xs text-green-400 mt-1">
+                                        Based on your day-by-day configuration
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Time Selection - Only for Simple Mode and Single Day */}
+                        {!useGranularSelection && totalDays === 1 && (
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium text-slate-300 mb-2">Time Range (Optional)</label>
+                                <div className="text-xs text-slate-400 mb-2">
+                                    Select time range for half-day requests or to specify exact hours
+                                </div>
+
+                                <div className="text-xs text-slate-400 mb-2">
+                                    Business hours: 8:00 AM - 5:00 PM only<br/>
+                                    <span className="text-blue-400">💡 Tip: 12:30 PM is the half-day boundary</span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs text-slate-400 mb-1">From</label>
+                                        <input
+                                            type="time"
+                                            value={startTime}
+                                            onChange={(e) => setStartTime(e.target.value)}
+                                            min="08:00"
+                                            max="17:00"
+                                            step="1800"
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-slate-400 mb-1">To</label>
+                                        <input
+                                            type="time"
+                                            value={endTime}
+                                            onChange={(e) => setEndTime(e.target.value)}
+                                            min="08:00"
+                                            max="17:00"
+                                            step="1800"
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
+                                        />
+                                    </div>
+                                </div>
+                                {totalHours > 0 && (
+                                    <div className="mt-2 space-y-1">
+                                        <div className="text-sm text-slate-300 bg-green-900/20 p-2 rounded">
+                                            <strong>Total Hours: {totalHours}</strong>
+                                        </div>
+                                        {leaveUnits > 0 && (
+                                            <div className="text-sm text-slate-300 bg-purple-900/20 p-2 rounded">
+                                                <strong>
+                                                    Leave Deduction: {leaveUnits} {leaveUnits === 0.5 ? 'half day' : leaveUnits === 1 ? 'full day' : 'days'}
+                                                </strong>
+                                                {totalHours < 1.5 && (
+                                                    <div className="text-xs text-slate-400 mt-1">
+                                                        (Less than 1.5 hours = no deduction)
+                                                    </div>
+                                                )}
+                                                {totalHours >= 1.5 && totalHours < 4 && (
+                                                    <div className="text-xs text-slate-400 mt-1">
+                                                        (1.5-4 hours = half day)
+                                                    </div>
+                                                )}
+                                                {totalHours >= 4 && (
+                                                    <div className="text-xs text-slate-400 mt-1">
+                                                        (4+ hours = full day)
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                        {totalHours > 0 && totalHours < 1.5 && (
+                                            <div className="text-sm text-green-300 bg-green-900/20 p-2 rounded">
+                                                <strong>Short leave - No leave deduction</strong>
+                                                <div className="text-xs text-green-400 mt-1">
+                                                    (Less than 1.5 hours)
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Multi-day Time Selection Notice */}
+                        {!useGranularSelection && totalDays > 1 && (
+                            <div className="mb-4">
+                                <div className="text-sm text-slate-400 bg-gray-900/30 p-3 rounded border border-gray-600">
+                                    <div className="flex items-center space-x-2">
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        </svg>
+                                        <span><strong>Multi-day request detected</strong></span>
+                                    </div>
+                                    <p className="text-xs text-slate-400 mt-1">
+                                        Time selection is disabled for multi-day requests in simple mode.
+                                        Use "Detailed Planning" mode for day-by-day time configuration.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Reason */}
                         <div className="mb-6">

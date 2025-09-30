@@ -467,7 +467,6 @@ export default function AdminDashboard() {
                     </div>
                 )}
             </div>
-
             {/* User Management Section */}
             <div className="bg-card p-6 rounded-lg shadow-sm">
                 <div className="flex justify-between items-center mb-4">

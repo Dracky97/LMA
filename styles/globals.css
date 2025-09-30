@@ -7,6 +7,8 @@
   --card-foreground: #ededed;
   --muted: #262626;
   --muted-foreground: #a3a3a3;
+  --brand-primary: #411e75;
+  --brand-secondary: #c6a876;
 }
 
 @theme inline {

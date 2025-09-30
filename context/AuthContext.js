@@ -1,10 +1,25 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
+import {
+    getAuth,
+    onAuthStateChanged,
+    createUserWithEmailAndPassword,
+    signInWithEmailAndPassword,
+    signOut,
+    sendPasswordResetEmail,
+    updatePassword,
+    reauthenticateWithCredential,
+    EmailAuthProvider,
+    connectAuthEmulator
+} from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { app } from '../lib/firebase-client';
 
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+// Ensure auth is properly initialized
+console.log('Firebase Auth initialized:', auth);
+console.log('Firebase App:', app);
 
 const AuthContext = createContext();
 
@@ -177,20 +192,59 @@ export const AuthProvider = ({ children }) => {
 
     const changePassword = async (currentPassword, newPassword) => {
         try {
+            // If no parameters provided, send password reset email
+            if (!currentPassword && !newPassword) {
+                console.log('=== PASSWORD RESET EMAIL ===');
+
+                if (!user || !user.email) {
+                    throw new Error('No user is currently signed in');
+                }
+
+                console.log('📧 Sending password reset email to:', user.email);
+
+                await sendPasswordResetEmail(auth, user.email);
+                console.log('✅ Password reset email sent successfully');
+
+                return {
+                    success: true,
+                    message: 'Password reset link has been sent to your email address. Please check your email and follow the instructions to reset your password.'
+                };
+            }
+
+            // Original password change logic (if needed for admin purposes)
+            console.log('=== DIRECT PASSWORD CHANGE ===');
+
             if (!user) {
                 throw new Error('No user is currently signed in');
             }
 
+            if (!user.email) {
+                throw new Error('User email not available');
+            }
+
+            console.log('🔐 Attempting direct password change for:', user.email);
+
             // Re-authenticate user before changing password
             const credential = EmailAuthProvider.credential(user.email, currentPassword);
             await reauthenticateWithCredential(user, credential);
-            
+
             // Update password
             await updatePassword(user, newPassword);
+
             return { success: true, message: 'Password updated successfully!' };
         } catch (error) {
-            console.error("Error changing password:", error);
-            throw new Error(`Password change failed: ${error.message}`);
+            console.error('Password operation error:', error);
+
+            // Handle specific Firebase Auth errors
+            if (error.code === 'auth/user-not-found') {
+                throw new Error('No user found with this email address');
+            } else if (error.code === 'auth/invalid-email') {
+                throw new Error('Invalid email address');
+            } else if (error.code === 'auth/network-request-failed') {
+                throw new Error('Network error. Please check your internet connection');
+            } else {
+                throw new Error(`Password operation failed: ${error.message}`);
+            }
         }
     };
 

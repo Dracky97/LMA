@@ -43,7 +43,41 @@ exports.onLeaveRequestCreate = onDocumentCreated({
         from: '"HRMS Portal" <hrms@aibs.edu.lk>',
         to: managerData.email,
         subject: `New Leave Request from ${employeeData.name}`,
-        html: `<p>Hello ${managerData.name},</p><p>${employeeData.name} has submitted a new leave request for your approval.</p><p><strong>Type:</strong> ${requestData.type}</p><p><strong>Reason:</strong> ${requestData.reason}</p><p>Please log in to the HR Portal to review the request.</p>`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #1e293b; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">New Leave Request</h2>
+
+                <p>Hello <strong>${managerData.name}</strong>,</p>
+
+                <p><strong>${employeeData.name}</strong> has submitted a new leave request for your approval.</p>
+
+                <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3b82f6;">
+                    <p style="margin: 5px 0;"><strong>Employee:</strong> <span style="color: #1e293b; font-weight: bold;">${employeeData.name}</span></p>
+                    <p style="margin: 5px 0;"><strong>Leave Type:</strong> <span style="color: #1e293b; font-weight: bold;">${requestData.type}</span></p>
+                    <p style="margin: 5px 0;"><strong>Duration:</strong> <span style="color: #1e293b; font-weight: bold;">${requestData.totalDays || requestData.leaveUnits || 'N/A'} day(s)</span></p>
+                    <p style="margin: 5px 0;"><strong>Department:</strong> ${employeeData.department || 'N/A'}</p>
+                    ${requestData.reason ? `<p style="margin: 5px 0;"><strong>Reason:</strong> ${requestData.reason}</p>` : ''}
+                    <p style="margin: 5px 0;"><strong>Applied On:</strong> ${new Date(requestData.appliedOn._seconds * 1000).toLocaleDateString()}</p>
+                </div>
+
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="https://leave-management-app-20ee9.firebaseapp.com/team-requests"
+                       style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+                        Review Team Requests
+                    </a>
+                </div>
+
+                <p style="color: #64748b; font-size: 14px;">
+                    You can also log in to the HR Portal and navigate to "Team Requests" to review this and other pending requests.
+                </p>
+
+                <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+
+                <p style="color: #64748b; font-size: 12px; text-align: center;">
+                    This is an automated message from the HRMS Portal. Please do not reply to this email.
+                </p>
+            </div>
+        `,
     };
 
     try {

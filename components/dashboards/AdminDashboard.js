@@ -371,24 +371,24 @@ export default function AdminDashboard() {
 
         setShowPasswordDialog(false);
         setPasswordError('');
-        
+
         if (!window.confirm('Are you sure you want to reset all users\' leave balances? This action cannot be undone.')) {
             return;
         }
 
         setResetInProgress(true);
         setResetMessage('');
-        
+
         try {
             const batch = writeBatch(db);
             let updateCount = 0;
-            
+
             users.forEach(user => {
                 const userRef = doc(db, 'users', user.id);
-                
+
                 // Calculate new annual leave allocation
                 const newAnnualLeave = getAnnualLeaveAllocation(user.createdAt);
-                
+
                 // Reset leave balances to standard allocations
                 const resetBalances = {
                     annualLeave: newAnnualLeave,
@@ -398,21 +398,22 @@ export default function AdminDashboard() {
                     shortLeave: 12,
                     other: 0
                 };
-                
+
                 // Add gender-specific leaves
                 if (user.gender === 'female') {
                     resetBalances.maternityLeave = 84;
                 } else if (user.gender === 'male') {
                     resetBalances.paternityLeave = 3;
                 }
-                
+
+
                 batch.update(userRef, { leaveBalance: resetBalances });
                 updateCount++;
             });
-            
+
             await batch.commit();
             setResetMessage(`Successfully reset leave balances for ${updateCount} users`);
-            
+
         } catch (error) {
             console.error('Error resetting leave balances:', error);
             setResetMessage(`Error resetting leave balances: ${error.message}`);
@@ -458,7 +459,7 @@ export default function AdminDashboard() {
                                 <span>Reset All Leave Balances</span>
                             </>
                         )}
-                    </button>
+                        </button>
                 </div>
                 
                 {resetMessage && (

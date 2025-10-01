@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/router';
 import { useAuth } from '../../context/AuthContext';
 import { getFirestore, collection, onSnapshot, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { app } from '../../lib/firebase-client';
@@ -16,8 +17,11 @@ const db = getFirestore(app);
 
 export default function HRManagerDashboard() {
     const { userData } = useAuth();
+    const router = useRouter();
     const [allRequests, setAllRequests] = useState([]);
     const [users, setUsers] = useState({});
+    const [filteredUsers, setFilteredUsers] = useState({});
+    const [searchTerm, setSearchTerm] = useState('');
     const [message, setMessage] = useState(null);
     const [activeTab, setActiveTab] = useState('requests');
     const [showLeaveModal, setShowLeaveModal] = useState(false);
@@ -28,7 +32,13 @@ export default function HRManagerDashboard() {
     useEffect(() => {
         const usersUnsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
             const usersData = {};
-            snapshot.forEach(doc => usersData[doc.id] = doc.data());
+            snapshot.forEach(doc => {
+                usersData[doc.id] = {
+                    ...doc.data(),
+                    uid: doc.id,
+                    id: doc.id
+                };
+            });
             setUsers(usersData);
         });
 
@@ -49,6 +59,30 @@ export default function HRManagerDashboard() {
             requestsUnsubscribe();
         };
     }, []);
+
+    // Filter users based on search term
+    useEffect(() => {
+        if (!searchTerm.trim()) {
+            setFilteredUsers(users);
+        } else {
+            const filtered = Object.values(users).filter(user => {
+                const searchLower = searchTerm.toLowerCase();
+                return (
+                    user.name?.toLowerCase().includes(searchLower) ||
+                    user.department?.toLowerCase().includes(searchLower) ||
+                    user.employeeNumber?.toLowerCase().includes(searchLower) ||
+                    user.email?.toLowerCase().includes(searchLower)
+                );
+            });
+            // Preserve the document ID as the key when filtering
+            const filteredWithKeys = {};
+            filtered.forEach(user => {
+                const key = user.uid || user.id;
+                filteredWithKeys[key] = user;
+            });
+            setFilteredUsers(filteredWithKeys);
+        }
+    }, [users, searchTerm]);
 
     const handleFinalApproval = async (requestId, newStatus, rejectionReason = '') => {
         try {
@@ -419,6 +453,11 @@ export default function HRManagerDashboard() {
         }
     };
 
+    // Function to handle profile navigation
+    const handleProfileClick = (userId) => {
+        router.push(`/profile/${userId}`);
+    };
+
     // Function to format leave balance display
     const formatLeaveBalance = (balance) => {
         if (balance === undefined || balance === null) return '0';
@@ -505,6 +544,29 @@ export default function HRManagerDashboard() {
                 
                 {activeTab === 'balances' && (
                     <div className="p-6">
+                        {/* Search Bar */}
+                        <div className="mb-6">
+                            <div className="relative">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <svg className="h-5 w-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                    </svg>
+                                </div>
+                                <input
+                                    type="text"
+                                    placeholder="Search by name, department, employee number, or email..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="block w-full pl-10 pr-3 py-2 border border-gray-600 rounded-md leading-5 bg-muted text-slate-200 placeholder-slate-400 focus:outline-none focus:bg-card focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                />
+                            </div>
+                            {searchTerm && (
+                                <div className="mt-2 text-sm text-slate-400">
+                                    Showing {Object.keys(filteredUsers).length} of {Object.keys(users).length} users
+                                </div>
+                            )}
+                        </div>
+
                         <div className="overflow-x-auto">
                             <table className="min-w-full divide-y divide-gray-700">
                                 <thead className="bg-muted">
@@ -522,9 +584,16 @@ export default function HRManagerDashboard() {
                                     </tr>
                                 </thead>
                                 <tbody className="bg-card divide-y divide-gray-700">
-                                    {Object.values(users).map(user => (
-                                        <tr key={user.uid || user.id}>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-200">{user.name}</td>
+                                    {Object.values(filteredUsers).map(user => (
+                                        <tr key={user.uid || user.id} className="hover:bg-muted/50 transition-colors">
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                                <button
+                                                    onClick={() => handleProfileClick(user.uid || user.id)}
+                                                    className="font-medium text-blue-400 hover:text-blue-300 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-card rounded"
+                                                >
+                                                    {user.name}
+                                                </button>
+                                            </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{user.department || 'N/A'}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.annualLeave)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.sickLeave)}</td>
@@ -538,6 +607,11 @@ export default function HRManagerDashboard() {
                                     ))}
                                 </tbody>
                             </table>
+                            {Object.keys(filteredUsers).length === 0 && searchTerm && (
+                                <div className="text-center py-8 text-slate-400">
+                                    No users found matching "{searchTerm}"
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}

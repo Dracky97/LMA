@@ -567,7 +567,7 @@ export default function HRManagerDashboard() {
                             )}
                         </div>
 
-                        <div className="overflow-x-auto">
+                        <div className="overflow-x-scroll h-96 overflow-y-auto">
                             <table className="min-w-full divide-y divide-gray-700">
                                 <thead className="bg-muted">
                                     <tr>
@@ -714,7 +714,7 @@ export default function HRManagerDashboard() {
                                     {/* Department Statistics */}
                                     <div className="mb-8">
                                         <h4 className="text-md font-medium text-slate-200 mb-4">Department Statistics</h4>
-                                        <div className="overflow-x-auto">
+                                        <div className="overflow-x-scroll h-64 overflow-y-auto">
                                             <table className="min-w-full divide-y divide-gray-700">
                                                 <thead className="bg-muted">
                                                     <tr>
@@ -748,7 +748,7 @@ export default function HRManagerDashboard() {
                                     {/* Detailed Request List */}
                                     <div>
                                         <h4 className="text-md font-medium text-slate-200 mb-4">Detailed Request List</h4>
-                                        <div className="overflow-x-auto">
+                                        <div className="overflow-x-scroll h-64 overflow-y-auto">
                                             <table className="min-w-full divide-y divide-gray-700">
                                                 <thead className="bg-muted">
                                                     <tr>

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import DashboardLayout from '../../components/DashboardLayout';
 import { useAuth } from '../../context/AuthContext';
-import { getFirestore, doc, getDoc } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { app } from '../../lib/firebase-client';
 
 const db = getFirestore(app);
@@ -13,6 +13,9 @@ export default function ProfilePage() {
     const { userData: currentUserData } = useAuth();
     const [profileData, setProfileData] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [isEditingEvaluation, setIsEditingEvaluation] = useState(false);
+    const [newEvaluationDate, setNewEvaluationDate] = useState('');
+    const [message, setMessage] = useState(null);
 
     useEffect(() => {
         if (!userId) return;
@@ -22,7 +25,9 @@ export default function ProfilePage() {
             try {
                 const docSnap = await getDoc(userDocRef);
                 if (docSnap.exists()) {
-                    setProfileData(docSnap.data());
+                    const data = docSnap.data();
+                    setProfileData(data);
+                    setNewEvaluationDate(data.nextEvaluationDate ? new Date(data.nextEvaluationDate).toISOString().split('T')[0] : '');
                 }
             } catch (error) {
                 console.error("Error fetching profile:", error);
@@ -33,10 +38,42 @@ export default function ProfilePage() {
         fetchProfile();
     }, [userId]);
 
+    const handleEditEvaluation = () => {
+        setIsEditingEvaluation(true);
+        setNewEvaluationDate(profileData.nextEvaluationDate ? new Date(profileData.nextEvaluationDate).toISOString().split('T')[0] : '');
+    };
+
+    const handleCancelEdit = () => {
+        setIsEditingEvaluation(false);
+        setNewEvaluationDate(profileData.nextEvaluationDate ? new Date(profileData.nextEvaluationDate).toISOString().split('T')[0] : '');
+    };
+
+    const handleSaveEvaluation = async () => {
+        try {
+            setMessage(null);
+            const userDocRef = doc(db, 'users', userId);
+            await updateDoc(userDocRef, {
+                nextEvaluationDate: newEvaluationDate ? new Date(newEvaluationDate).toISOString() : null
+            });
+
+            setProfileData({ ...profileData, nextEvaluationDate: newEvaluationDate ? new Date(newEvaluationDate).toISOString() : null });
+            setIsEditingEvaluation(false);
+            setMessage({ type: 'success', text: 'Evaluation date updated successfully.' });
+        } catch (error) {
+            console.error("Error updating evaluation date:", error);
+            setMessage({ type: 'error', text: `Error updating evaluation date: ${error.message}` });
+        }
+    };
+
     if (loading) return <DashboardLayout><div>Loading profile...</div></DashboardLayout>;
     if (!profileData) return <DashboardLayout><div>User not found.</div></DashboardLayout>;
 
     const canEdit = currentUserData?.uid === userId || currentUserData?.role === 'Admin';
+    const canEditEvaluation = currentUserData?.role === 'Admin' || currentUserData?.role === 'Manager HR' || currentUserData?.role === 'HR Manager';
+
+    // Debug logging for role checking
+    console.log('Current user role:', currentUserData?.role);
+    console.log('Can edit evaluation:', canEditEvaluation);
 
     return (
         <DashboardLayout>
@@ -82,6 +119,10 @@ export default function ProfilePage() {
                                 {profileData.designation ? `${profileData.designation} - ` : ''}{profileData.department}
                             </p>
                             <p className="text-slate-500 mt-2">{profileData.personalDetails?.address || 'Location not specified'}</p>
+                            {/* Current user role indicator for debugging */}
+                            <p className="text-xs text-slate-600 mt-1">
+                                Your role: {currentUserData?.role || 'Not set'} {canEditEvaluation ? '(Can edit evaluations)' : '(Cannot edit evaluations)'}
+                            </p>
                         </div>
                         {canEdit && (
                             <button
@@ -159,27 +200,88 @@ export default function ProfilePage() {
                     <div className="lg:col-span-2 space-y-6">
                         {/* Performance Evaluation Section */}
                         <div className="bg-muted p-6 rounded-lg">
-                            <h3 className="text-lg font-semibold text-slate-200 mb-4">Performance Evaluation</h3>
-                            {profileData.nextEvaluationDate ? (
-                                <div className="space-y-3">
-                                    <div>
-                                        <p className="text-sm text-slate-400">Next Evaluation</p>
-                                        <p className="text-slate-200">{new Date(profileData.nextEvaluationDate).toLocaleDateString()}</p>
-                                    </div>
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-semibold text-slate-200">Performance Evaluation</h3>
+                                {canEditEvaluation && !isEditingEvaluation && (
+                                    <button
+                                        onClick={handleEditEvaluation}
+                                        className="bg-blue-600 text-white px-3 py-1 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm"
+                                    >
+                                        Edit Dates
+                                    </button>
+                                )}
+                            </div>
+
+                            {message && (
+                                <div className={`p-3 rounded-md mb-4 ${message.type === 'success' ? 'bg-green-900/30 text-green-300' : 'bg-red-900/30 text-red-300'}`}>
+                                    {message.text}
+                                </div>
+                            )}
+
+                            <div className="space-y-3">
+                                {/* Last Evaluation Field */}
+                                <div>
+                                    <p className="text-sm text-slate-400">Last Evaluation</p>
+                                    <p className="text-slate-200">
+                                        {profileData.lastEvaluationDate
+                                            ? new Date(profileData.lastEvaluationDate).toLocaleDateString()
+                                            : 'Not set'
+                                        }
+                                    </p>
+                                </div>
+
+                                {/* Next Evaluation Date */}
+                                <div>
+                                    <p className="text-sm text-slate-400">Next Evaluation</p>
+                                    {isEditingEvaluation ? (
+                                        <div className="flex items-center space-x-2 mt-1">
+                                            <input
+                                                type="date"
+                                                value={newEvaluationDate}
+                                                onChange={(e) => setNewEvaluationDate(e.target.value)}
+                                                className="bg-card text-slate-200 border border-gray-600 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                            />
+                                            <button
+                                                onClick={handleSaveEvaluation}
+                                                className="bg-green-600 text-white px-2 py-1 rounded text-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+                                            >
+                                                Save
+                                            </button>
+                                            <button
+                                                onClick={handleCancelEdit}
+                                                className="bg-gray-600 text-white px-2 py-1 rounded text-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                                            >
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center justify-between">
+                                            <p className="text-slate-200">
+                                                {profileData.nextEvaluationDate
+                                                    ? new Date(profileData.nextEvaluationDate).toLocaleDateString()
+                                                    : 'Not set'
+                                                }
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Days Until Next Evaluation */}
+                                {profileData.nextEvaluationDate && !isEditingEvaluation && (
                                     <div>
                                         <p className="text-sm text-slate-400">Days Until Next Evaluation</p>
                                         <p className="text-2xl font-bold text-blue-400">
                                             {Math.max(0, Math.ceil((new Date(profileData.nextEvaluationDate) - new Date()) / (1000 * 60 * 60 * 24)))}
                                         </p>
                                     </div>
-                                    <div>
-                                        <p className="text-sm text-slate-400">Employee Status</p>
-                                        <p className="text-slate-200 capitalize">{profileData.employeeStatus || 'Not set'}</p>
-                                    </div>
+                                )}
+
+                                {/* Employee Status */}
+                                <div>
+                                    <p className="text-sm text-slate-400">Employee Status</p>
+                                    <p className="text-slate-200 capitalize">{profileData.employeeStatus || 'Not set'}</p>
                                 </div>
-                            ) : (
-                                <p className="text-slate-500">No evaluation schedule set.</p>
-                            )}
+                            </div>
                         </div>
 
                         {/* Education Section */}

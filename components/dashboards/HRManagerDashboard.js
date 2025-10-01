@@ -71,7 +71,8 @@ export default function HRManagerDashboard() {
                     user.name?.toLowerCase().includes(searchLower) ||
                     user.department?.toLowerCase().includes(searchLower) ||
                     user.employeeNumber?.toLowerCase().includes(searchLower) ||
-                    user.email?.toLowerCase().includes(searchLower)
+                    user.email?.toLowerCase().includes(searchLower) ||
+                    (user.nextEvaluationDate && new Date(user.nextEvaluationDate).toLocaleDateString().toLowerCase().includes(searchLower))
                 );
             });
             // Preserve the document ID as the key when filtering
@@ -554,7 +555,7 @@ export default function HRManagerDashboard() {
                                 </div>
                                 <input
                                     type="text"
-                                    placeholder="Search by name, department, employee number, or email..."
+                                    placeholder="Search by name, department, employee number, email, or evaluation date..."
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                     className="block w-full pl-10 pr-3 py-2 border border-gray-600 rounded-md leading-5 bg-muted text-slate-200 placeholder-slate-400 focus:outline-none focus:bg-card focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
@@ -573,6 +574,7 @@ export default function HRManagerDashboard() {
                                     <tr>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Employee</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Department</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Next Evaluation</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Annual Leave</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Sick Leave</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Casual Leave</th>
@@ -595,6 +597,9 @@ export default function HRManagerDashboard() {
                                                 </button>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{user.department || 'N/A'}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+                                                {user.nextEvaluationDate ? new Date(user.nextEvaluationDate).toLocaleDateString() : 'Not set'}
+                                            </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.annualLeave)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.sickLeave)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.casualLeave)}</td>

@@ -481,6 +481,7 @@ export default function HRManagerDashboard() {
     const openEditBalanceModal = (user) => {
         setEditingUser(user);
         setEditBalanceData({
+            // Current leave balances (remaining days)
             annualLeave: user.leaveBalance?.annualLeave || 0,
             sickLeave: user.leaveBalance?.sickLeave || 0,
             casualLeave: user.leaveBalance?.casualLeave || 0,
@@ -488,7 +489,16 @@ export default function HRManagerDashboard() {
             paternityLeave: user.leaveBalance?.paternityLeave || 0,
             'leave in-lieu': user.leaveBalance?.['leave in-lieu'] || 0,
             shortLeave: user.leaveBalance?.shortLeave || 0,
-            other: user.leaveBalance?.other || 0
+            other: user.leaveBalance?.other || 0,
+            // Total leave allocations (custom totals per user)
+            annualLeaveTotal: user.leaveAllocations?.annualLeave || 14,
+            sickLeaveTotal: user.leaveAllocations?.sickLeave || 7,
+            casualLeaveTotal: user.leaveAllocations?.casualLeave || 7,
+            maternityLeaveTotal: user.leaveAllocations?.maternityLeave || 84,
+            paternityLeaveTotal: user.leaveAllocations?.paternityLeave || 3,
+            'leave in-lieuTotal': user.leaveAllocations?.['leave in-lieu'] || 0,
+            shortLeaveTotal: user.leaveAllocations?.shortLeave || 12,
+            otherTotal: user.leaveAllocations?.other || 0
         });
         setShowEditBalanceModal(true);
     };
@@ -505,10 +515,36 @@ export default function HRManagerDashboard() {
     const saveBalanceChanges = async () => {
         try {
             const userRef = doc(db, "users", editingUser.uid || editingUser.id);
+
+            // Prepare current leave balances (remaining days)
+            const leaveBalance = {
+                annualLeave: editBalanceData.annualLeave,
+                sickLeave: editBalanceData.sickLeave,
+                casualLeave: editBalanceData.casualLeave,
+                maternityLeave: editBalanceData.maternityLeave,
+                paternityLeave: editBalanceData.paternityLeave,
+                'leave in-lieu': editBalanceData['leave in-lieu'],
+                shortLeave: editBalanceData.shortLeave,
+                other: editBalanceData.other
+            };
+
+            // Prepare total leave allocations (custom totals per user)
+            const leaveAllocations = {
+                annualLeave: editBalanceData.annualLeaveTotal,
+                sickLeave: editBalanceData.sickLeaveTotal,
+                casualLeave: editBalanceData.casualLeaveTotal,
+                maternityLeave: editBalanceData.maternityLeaveTotal,
+                paternityLeave: editBalanceData.paternityLeaveTotal,
+                'leave in-lieu': editBalanceData['leave in-lieuTotal'],
+                shortLeave: editBalanceData.shortLeaveTotal,
+                other: editBalanceData.otherTotal
+            };
+
             await updateDoc(userRef, {
-                leaveBalance: editBalanceData
+                leaveBalance,
+                leaveAllocations
             });
-            setMessage({ type: 'success', text: `Leave balances updated successfully for ${editingUser.name}` });
+            setMessage({ type: 'success', text: `Leave balances and allocations updated successfully for ${editingUser.name}` });
             setShowEditBalanceModal(false);
             setEditingUser(null);
         } catch (error) {
@@ -893,93 +929,193 @@ export default function HRManagerDashboard() {
                                 </button>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-6">
+                                {/* Current Leave Balances Section */}
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-1">Annual Leave</label>
-                                    <input
-                                        type="number"
-                                        step="0.5"
-                                        value={editBalanceData.annualLeave}
-                                        onChange={(e) => handleBalanceChange('annualLeave', e.target.value)}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    />
+                                    <h4 className="text-md font-semibold text-slate-300 mb-3">Current Leave Balances (Remaining Days)</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Annual Leave</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.annualLeave}
+                                                onChange={(e) => handleBalanceChange('annualLeave', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Sick Leave</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.sickLeave}
+                                                onChange={(e) => handleBalanceChange('sickLeave', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Casual Leave</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.casualLeave}
+                                                onChange={(e) => handleBalanceChange('casualLeave', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Maternity Leave</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.maternityLeave}
+                                                onChange={(e) => handleBalanceChange('maternityLeave', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Paternity Leave</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.paternityLeave}
+                                                onChange={(e) => handleBalanceChange('paternityLeave', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Leave in-lieu</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData['leave in-lieu']}
+                                                onChange={(e) => handleBalanceChange('leave in-lieu', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Short Leave</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.shortLeave}
+                                                onChange={(e) => handleBalanceChange('shortLeave', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Other Leave</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.other}
+                                                onChange={(e) => handleBalanceChange('other', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
 
+                                {/* Total Leave Allocations Section */}
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-1">Sick Leave</label>
-                                    <input
-                                        type="number"
-                                        step="0.5"
-                                        value={editBalanceData.sickLeave}
-                                        onChange={(e) => handleBalanceChange('sickLeave', e.target.value)}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    />
-                                </div>
+                                    <h4 className="text-md font-semibold text-slate-300 mb-3">Total Leave Allocations (Annual Entitlements)</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Annual Leave Total</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.annualLeaveTotal}
+                                                onChange={(e) => handleBalanceChange('annualLeaveTotal', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-green-500"
+                                            />
+                                        </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-1">Casual Leave</label>
-                                    <input
-                                        type="number"
-                                        step="0.5"
-                                        value={editBalanceData.casualLeave}
-                                        onChange={(e) => handleBalanceChange('casualLeave', e.target.value)}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    />
-                                </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Sick Leave Total</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.sickLeaveTotal}
+                                                onChange={(e) => handleBalanceChange('sickLeaveTotal', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-green-500"
+                                            />
+                                        </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-1">Maternity Leave</label>
-                                    <input
-                                        type="number"
-                                        step="0.5"
-                                        value={editBalanceData.maternityLeave}
-                                        onChange={(e) => handleBalanceChange('maternityLeave', e.target.value)}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    />
-                                </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Casual Leave Total</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.casualLeaveTotal}
+                                                onChange={(e) => handleBalanceChange('casualLeaveTotal', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-green-500"
+                                            />
+                                        </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-1">Paternity Leave</label>
-                                    <input
-                                        type="number"
-                                        step="0.5"
-                                        value={editBalanceData.paternityLeave}
-                                        onChange={(e) => handleBalanceChange('paternityLeave', e.target.value)}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    />
-                                </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Maternity Leave Total</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.maternityLeaveTotal}
+                                                onChange={(e) => handleBalanceChange('maternityLeaveTotal', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-green-500"
+                                            />
+                                        </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-1">Leave in-lieu</label>
-                                    <input
-                                        type="number"
-                                        step="0.5"
-                                        value={editBalanceData['leave in-lieu']}
-                                        onChange={(e) => handleBalanceChange('leave in-lieu', e.target.value)}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    />
-                                </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Paternity Leave Total</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.paternityLeaveTotal}
+                                                onChange={(e) => handleBalanceChange('paternityLeaveTotal', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-green-500"
+                                            />
+                                        </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-1">Short Leave</label>
-                                    <input
-                                        type="number"
-                                        step="0.5"
-                                        value={editBalanceData.shortLeave}
-                                        onChange={(e) => handleBalanceChange('shortLeave', e.target.value)}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    />
-                                </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Leave in-lieu Total</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData['leave in-lieuTotal']}
+                                                onChange={(e) => handleBalanceChange('leave in-lieuTotal', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-green-500"
+                                            />
+                                        </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-1">Other Leave</label>
-                                    <input
-                                        type="number"
-                                        step="0.5"
-                                        value={editBalanceData.other}
-                                        onChange={(e) => handleBalanceChange('other', e.target.value)}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    />
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Short Leave Total</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.shortLeaveTotal}
+                                                onChange={(e) => handleBalanceChange('shortLeaveTotal', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-green-500"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Other Leave Total</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.otherTotal}
+                                                onChange={(e) => handleBalanceChange('otherTotal', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-green-500"
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 

@@ -247,7 +247,17 @@ export default function AdminDashboard() {
             gender: user.gender || '',
             managerId: user.managerId || '',
             personalDetails: user.personalDetails || { phone: '', address: '', dob: '' },
-            leaveBalance: user.leaveBalance || {}
+            leaveBalance: user.leaveBalance || {},
+            leaveAllocations: user.leaveAllocations || {
+                annualLeave: 14,
+                sickLeave: 7,
+                casualLeave: 7,
+                maternityLeave: 84,
+                paternityLeave: 3,
+                'leave in-lieu': 0,
+                shortLeave: 12,
+                other: 0
+            }
         });
         setShowEditModal(true);
     };
@@ -292,6 +302,20 @@ export default function AdminDashboard() {
                 const nextEvaluationDate = new Date(joinedDateObj);
                 nextEvaluationDate.setMonth(nextEvaluationDate.getMonth() + 3);
                 updateData.nextEvaluationDate = nextEvaluationDate.toISOString();
+            }
+
+            // Ensure leaveAllocations is included in the update
+            if (!updateData.leaveAllocations) {
+                updateData.leaveAllocations = editingUser.leaveAllocations || {
+                    annualLeave: 14,
+                    sickLeave: 7,
+                    casualLeave: 7,
+                    maternityLeave: 84,
+                    paternityLeave: 3,
+                    'leave in-lieu': 0,
+                    shortLeave: 12,
+                    other: 0
+                };
             }
 
             await updateDoc(userDocRef, updateData);
@@ -1023,8 +1047,8 @@ export default function AdminDashboard() {
                                         />
                                     </div>
                                     
-                                    <h4 className="text-md font-semibold text-slate-300 mt-6">Leave Balance</h4>
-                                    
+                                    <h4 className="text-md font-semibold text-slate-300 mt-6">Current Leave Balances (Remaining Days)</h4>
+
                                     {Object.entries(editUserData.leaveBalance || {}).map(([leaveType, balance]) => (
                                         <div key={leaveType}>
                                             <label className="block text-sm font-medium text-slate-300 mb-1 capitalize">
@@ -1036,6 +1060,31 @@ export default function AdminDashboard() {
                                                 value={balance}
                                                 onChange={(e) => handleLeaveBalanceChange(leaveType, e.target.value)}
                                                 className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+                                    ))}
+
+                                    <h4 className="text-md font-semibold text-slate-300 mt-6">Total Leave Allocations (Annual Entitlements)</h4>
+
+                                    {Object.entries(editUserData.leaveAllocations || {}).map(([leaveType, allocation]) => (
+                                        <div key={`allocation-${leaveType}`}>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1 capitalize">
+                                                {leaveType.replace(/([A-Z])/g, ' $1').trim()} Total
+                                            </label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={allocation}
+                                                onChange={(e) => {
+                                                    setEditUserData(prev => ({
+                                                        ...prev,
+                                                        leaveAllocations: {
+                                                            ...prev.leaveAllocations,
+                                                            [leaveType]: parseFloat(e.target.value) || 0
+                                                        }
+                                                    }));
+                                                }}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-green-500"
                                             />
                                         </div>
                                     ))}

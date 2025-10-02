@@ -103,7 +103,7 @@ export const AuthProvider = ({ children }) => {
             } else if (currentMonth >= 6 && currentMonth <= 8) { // Jul-Sep
                 annualLeave = 7;
             } else if (currentMonth >= 9) { // Oct-Dec
-                annualLeave = 4;
+                annualLeave = 0; // Updated from 4 to 0 days
             }
 
             // Set gender-specific leave balances

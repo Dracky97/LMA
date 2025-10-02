@@ -14,9 +14,9 @@ service cloud.firestore {
       // Managers can update leave balances and noPay status when approving leave requests
       allow update: if request.auth != null &&
                        request.auth.uid == resource.data.managerId &&
-                       // Only allow updating leave balance and noPay status fields
+                       // Only allow updating leave balance, leave allocations and noPay status fields
                        request.resource.data.diff(resource.data).affectedKeys()
-                       .hasOnly(['leaveBalance', 'noPayStatus', 'noPayStartDate', 'noPayEndDate']);
+                       .hasOnly(['leaveBalance', 'leaveAllocations', 'noPayStatus', 'noPayStartDate', 'noPayEndDate']);
       
       // Allow all authenticated users to read basic user info (needed for dropdowns, etc.)
       allow read: if request.auth != null;
@@ -29,9 +29,9 @@ service cloud.firestore {
       // Allow HR Managers to update leave balances and noPay status for any user
       allow update: if request.auth != null &&
                        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Manager HR' &&
-                       // Only allow updating leave balance and noPay status fields
+                       // Only allow updating leave balance, leave allocations and noPay status fields
                        request.resource.data.diff(resource.data).affectedKeys()
-                       .hasOnly(['leaveBalance', 'noPayStatus', 'noPayStartDate', 'noPayEndDate']);
+                       .hasOnly(['leaveBalance', 'leaveAllocations', 'noPayStatus', 'noPayStartDate', 'noPayEndDate']);
     }
     
     // Leave requests collection rules

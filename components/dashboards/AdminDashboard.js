@@ -83,7 +83,11 @@ export default function AdminDashboard() {
     useEffect(() => {
         const usersCollectionRef = collection(db, 'users');
         const unsubscribe = onSnapshot(usersCollectionRef, (snapshot) => {
-            const usersList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const usersList = snapshot.docs.map(doc => ({
+                id: doc.id,
+                uid: doc.id,
+                ...doc.data()
+            }));
             const managerList = usersList.filter(user => user.role !== 'Employee');
             setUsers(usersList);
             setManagers(managerList);
@@ -236,6 +240,12 @@ export default function AdminDashboard() {
     };
 
     const openEditModal = (user) => {
+        console.log('=== OPENING EDIT MODAL ===');
+        console.log('User name:', user.name);
+        console.log('Full user object:', user);
+        console.log('User leaveBalance:', user.leaveBalance);
+        console.log('User leaveAllocations:', user.leaveAllocations);
+
         setEditingUser(user);
         setEditUserData({
             name: user.name || '',
@@ -247,8 +257,8 @@ export default function AdminDashboard() {
             gender: user.gender || '',
             managerId: user.managerId || '',
             personalDetails: user.personalDetails || { phone: '', address: '', dob: '' },
-            leaveBalance: user.leaveBalance || {},
-            leaveAllocations: user.leaveAllocations || {
+            leaveBalance: { ...user.leaveBalance } || {},
+            leaveAllocations: { ...user.leaveAllocations } || {
                 annualLeave: 14,
                 sickLeave: 7,
                 casualLeave: 7,
@@ -290,11 +300,32 @@ export default function AdminDashboard() {
 
     const saveUserChanges = async () => {
         try {
-            const userDocRef = doc(db, 'users', editingUser.id);
-            const updateData = { ...editUserData };
+            console.log('=== ADMIN DASHBOARD SAVE START ===');
+            console.log('Editing user:', editingUser);
+            console.log('Edit user data:', editUserData);
 
-            // Update isManager flag based on role
-            updateData.isManager = (updateData.role !== 'Employee');
+            if (!editingUser) {
+                throw new Error('No user selected for editing');
+            }
+
+            const userId = editingUser.uid || editingUser.id;
+            if (!userId) {
+                throw new Error('User ID not found');
+            }
+
+            const userDocRef = doc(db, 'users', userId);
+            console.log('User document reference:', userDocRef.path);
+
+            // Prepare update data with only the fields we want to update
+            const updateData = {
+                leaveBalance: editUserData.leaveBalance || {},
+                leaveAllocations: editUserData.leaveAllocations || {}
+            };
+
+            // Update isManager flag based on role if role is being changed
+            if (editUserData.role !== editingUser.role) {
+                updateData.isManager = (editUserData.role !== 'Employee');
+            }
 
             // If joined date was changed, recalculate next evaluation date
             if (editUserData.joinedDate && editUserData.joinedDate !== editingUser.joinedDate) {
@@ -304,26 +335,28 @@ export default function AdminDashboard() {
                 updateData.nextEvaluationDate = nextEvaluationDate.toISOString();
             }
 
-            // Ensure leaveAllocations is included in the update
-            if (!updateData.leaveAllocations) {
-                updateData.leaveAllocations = editingUser.leaveAllocations || {
-                    annualLeave: 14,
-                    sickLeave: 7,
-                    casualLeave: 7,
-                    maternityLeave: 84,
-                    paternityLeave: 3,
-                    'leave in-lieu': 0,
-                    shortLeave: 12,
-                    other: 0
-                };
+            console.log('Final update data:', updateData);
+            console.log('Affected keys:', Object.keys(updateData));
+
+            // Only proceed if there are actual changes
+            if (Object.keys(updateData).length === 0) {
+                setSuccess('No changes to save');
+                setShowEditModal(false);
+                setEditingUser(null);
+                return;
             }
 
             await updateDoc(userDocRef, updateData);
-            setSuccess('User updated successfully');
+
+            console.log('✅ AdminDashboard update successful');
+            setSuccess('User leave allocations updated successfully');
             setShowEditModal(false);
             setEditingUser(null);
         } catch (error) {
-            console.error('Error updating user:', error);
+            console.error('❌ Error updating user in AdminDashboard:', error);
+            console.error('Error code:', error.code);
+            console.error('Error message:', error.message);
+            console.error('Error stack:', error.stack);
             setError('Failed to update user: ' + error.message);
         }
     };
@@ -1074,15 +1107,21 @@ export default function AdminDashboard() {
                                             <input
                                                 type="number"
                                                 step="0.5"
-                                                value={allocation}
+                                                value={allocation || 0}
                                                 onChange={(e) => {
-                                                    setEditUserData(prev => ({
-                                                        ...prev,
-                                                        leaveAllocations: {
-                                                            ...prev.leaveAllocations,
-                                                            [leaveType]: parseFloat(e.target.value) || 0
-                                                        }
-                                                    }));
+                                                    console.log(`Changing ${leaveType} allocation to:`, e.target.value);
+                                                    const newValue = parseFloat(e.target.value) || 0;
+                                                    setEditUserData(prev => {
+                                                        const updated = {
+                                                            ...prev,
+                                                            leaveAllocations: {
+                                                                ...prev.leaveAllocations,
+                                                                [leaveType]: newValue
+                                                            }
+                                                        };
+                                                        console.log('Updated editUserData:', updated);
+                                                        return updated;
+                                                    });
                                                 }}
                                                 className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-green-500"
                                             />

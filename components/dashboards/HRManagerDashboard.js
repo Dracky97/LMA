@@ -63,12 +63,41 @@ export default function HRManagerDashboard() {
         };
     }, []);
 
-    // Filter users based on search term
+    // Filter and sort users based on search term
     useEffect(() => {
+        let usersArray = Object.values(users);
+
+        // Sort users by employee number (ascending)
+        usersArray.sort((a, b) => {
+            const empNumA = a.employeeNumber || '';
+            const empNumB = b.employeeNumber || '';
+
+            // Handle empty employee numbers - push them to the end
+            if (!empNumA && !empNumB) return 0;
+            if (!empNumA) return 1;
+            if (!empNumB) return -1;
+
+            // Compare numerically if both are numbers, otherwise alphabetically
+            const numA = parseInt(empNumA);
+            const numB = parseInt(empNumB);
+
+            if (!isNaN(numA) && !isNaN(numB)) {
+                return numA - numB;
+            } else {
+                return empNumA.localeCompare(empNumB);
+            }
+        });
+
         if (!searchTerm.trim()) {
-            setFilteredUsers(users);
+            // Convert back to object format with proper keys
+            const sortedWithKeys = {};
+            usersArray.forEach(user => {
+                const key = user.uid || user.id;
+                sortedWithKeys[key] = user;
+            });
+            setFilteredUsers(sortedWithKeys);
         } else {
-            const filtered = Object.values(users).filter(user => {
+            const filtered = usersArray.filter(user => {
                 const searchLower = searchTerm.toLowerCase();
                 return (
                     user.name?.toLowerCase().includes(searchLower) ||
@@ -479,6 +508,11 @@ export default function HRManagerDashboard() {
 
     // Function to open edit balance modal
     const openEditBalanceModal = (user) => {
+        console.log('=== HR MANAGER OPENING EDIT MODAL ===');
+        console.log('User name:', user.name);
+        console.log('User leaveBalance:', user.leaveBalance);
+        console.log('User leaveAllocations:', user.leaveAllocations);
+
         setEditingUser(user);
         setEditBalanceData({
             // Current leave balances (remaining days)
@@ -514,41 +548,62 @@ export default function HRManagerDashboard() {
     // Function to save leave balance changes
     const saveBalanceChanges = async () => {
         try {
-            const userRef = doc(db, "users", editingUser.uid || editingUser.id);
+            console.log('=== HR MANAGER SAVE START ===');
+            console.log('Editing user:', editingUser);
+            console.log('Edit balance data:', editBalanceData);
+
+            if (!editingUser) {
+                throw new Error('No user selected for editing');
+            }
+
+            const userId = editingUser.uid || editingUser.id;
+            if (!userId) {
+                throw new Error('User ID not found');
+            }
+
+            const userRef = doc(db, "users", userId);
+            console.log('User document reference:', userRef.path);
 
             // Prepare current leave balances (remaining days)
             const leaveBalance = {
-                annualLeave: editBalanceData.annualLeave,
-                sickLeave: editBalanceData.sickLeave,
-                casualLeave: editBalanceData.casualLeave,
-                maternityLeave: editBalanceData.maternityLeave,
-                paternityLeave: editBalanceData.paternityLeave,
-                'leave in-lieu': editBalanceData['leave in-lieu'],
-                shortLeave: editBalanceData.shortLeave,
-                other: editBalanceData.other
+                annualLeave: editBalanceData.annualLeave || 0,
+                sickLeave: editBalanceData.sickLeave || 0,
+                casualLeave: editBalanceData.casualLeave || 0,
+                maternityLeave: editBalanceData.maternityLeave || 0,
+                paternityLeave: editBalanceData.paternityLeave || 0,
+                'leave in-lieu': editBalanceData['leave in-lieu'] || 0,
+                shortLeave: editBalanceData.shortLeave || 0,
+                other: editBalanceData.other || 0
             };
 
             // Prepare total leave allocations (custom totals per user)
             const leaveAllocations = {
-                annualLeave: editBalanceData.annualLeaveTotal,
-                sickLeave: editBalanceData.sickLeaveTotal,
-                casualLeave: editBalanceData.casualLeaveTotal,
-                maternityLeave: editBalanceData.maternityLeaveTotal,
-                paternityLeave: editBalanceData.paternityLeaveTotal,
-                'leave in-lieu': editBalanceData['leave in-lieuTotal'],
-                shortLeave: editBalanceData.shortLeaveTotal,
-                other: editBalanceData.otherTotal
+                annualLeave: editBalanceData.annualLeaveTotal || 14,
+                sickLeave: editBalanceData.sickLeaveTotal || 7,
+                casualLeave: editBalanceData.casualLeaveTotal || 7,
+                maternityLeave: editBalanceData.maternityLeaveTotal || 84,
+                paternityLeave: editBalanceData.paternityLeaveTotal || 3,
+                'leave in-lieu': editBalanceData['leave in-lieuTotal'] || 0,
+                shortLeave: editBalanceData.shortLeaveTotal || 12,
+                other: editBalanceData.otherTotal || 0
             };
+
+            console.log('Final data to update:', { leaveBalance, leaveAllocations });
 
             await updateDoc(userRef, {
                 leaveBalance,
                 leaveAllocations
             });
+
+            console.log('✅ HR Manager update successful');
             setMessage({ type: 'success', text: `Leave balances and allocations updated successfully for ${editingUser.name}` });
             setShowEditBalanceModal(false);
             setEditingUser(null);
         } catch (error) {
-            console.error("Error updating leave balances:", error);
+            console.error("❌ Error updating leave balances:", error);
+            console.error("Error code:", error.code);
+            console.error("Error message:", error.message);
+            console.error("Error stack:", error.stack);
             setMessage({ type: 'error', text: `Error updating leave balances: ${error.message}` });
         }
     };
@@ -1122,6 +1177,7 @@ export default function HRManagerDashboard() {
                             <div className="flex justify-end space-x-3 mt-6">
                                 <button
                                     onClick={() => {
+                                        console.log('Cancel button clicked');
                                         setShowEditBalanceModal(false);
                                         setEditingUser(null);
                                     }}
@@ -1130,7 +1186,11 @@ export default function HRManagerDashboard() {
                                     Cancel
                                 </button>
                                 <button
-                                    onClick={saveBalanceChanges}
+                                    onClick={() => {
+                                        console.log('Save Changes button clicked');
+                                        console.log('Current editBalanceData:', editBalanceData);
+                                        saveBalanceChanges();
+                                    }}
                                     className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-150 ease-in-out"
                                 >
                                     Save Changes

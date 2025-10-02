@@ -6,6 +6,9 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
         return null;
     }
 
+    // Check if user is currently on no pay status
+    const isOnNoPay = userData?.noPayStatus || false;
+
     // Filter leave types based on gender using shared configuration
     const filteredLeaveTypes = getFilteredLeaveBalanceTypes(gender);
 
@@ -22,11 +25,12 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
         const formatNumber = (num) => {
             return num % 1 === 0 ? num.toString() : num.toFixed(1);
         };
-        
+
         // Helper function to format day/days text
         const formatDaysText = (num) => {
             const formatted = formatNumber(num);
-            return num === 1 ? `${formatted} day` : `${formatted} days`;
+            const absNum = Math.abs(num);
+            return absNum === 1 ? `${formatted} day` : `${formatted} days`;
         };
         
         // For leave types with no standard allocation but have remaining days
@@ -40,14 +44,26 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
             };
         }
         
+        // Handle negative balances
+        if (remaining < 0) {
+            return {
+                mainNumber: formatDaysText(remaining),
+                mainLabel: 'Balance',
+                sub: `${formatDaysText(Math.abs(remaining))} overdrawn`,
+                showProgress: false,
+                status: 'negative',
+                shouldDisplay: true
+            };
+        }
+
         // If remaining balance is higher than standard allocation, use remaining as the base
         // This handles cases where users might have carried over leave or have different allocations
         const actualTotal = Math.max(remaining, standardAllocation);
         const used = Math.max(0, actualTotal - remaining);
-        
+
         // Calculate percentage for progress indication
         const percentageUsed = actualTotal > 0 ? (used / actualTotal) * 100 : 0;
-        
+
         return {
             mainNumber: formatDaysText(remaining),
             mainLabel: 'Remaining',
@@ -62,6 +78,7 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
     const getProgressColor = (status) => {
         switch(status) {
             case 'low': return 'bg-yellow-500';
+            case 'negative': return 'bg-red-500';
             default: return 'bg-green-500';
         }
     };
@@ -73,7 +90,14 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
 
     return (
         <div className="bg-card p-6 rounded-lg shadow-sm">
-            <h2 className="text-xl font-semibold text-slate-200 mb-4">My Leave Balance</h2>
+            <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold text-slate-200">My Leave Balance</h2>
+                {isOnNoPay && (
+                    <div className="bg-red-900/30 text-red-300 px-3 py-1 rounded-full text-sm font-medium border border-red-500/30">
+                        ⚠️ No Pay Status
+                    </div>
+                )}
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {displayableLeaveTypes.map((type, index) => {
                     const balance = type.balance;
@@ -87,6 +111,13 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
                                     </span>
                                 </div>
                             )}
+                            {balance.status === 'negative' && (
+                                <div className="absolute top-3 right-3">
+                                    <span className="text-xs bg-red-500/20 text-red-300 px-2 py-1 rounded-full">
+                                        Negative
+                                    </span>
+                                </div>
+                            )}
                             
                             {/* Leave Type Name */}
                             <div className="text-center mb-6">
@@ -95,7 +126,7 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
                             
                             {/* Remaining Days - Large Display */}
                             <div className="text-center mb-4">
-                                <p className={`text-2xl font-bold ${type.titleColor}`}>
+                                <p className={`text-2xl font-bold ${balance.status === 'negative' ? 'text-red-400' : type.titleColor}`}>
                                     {balance.mainNumber}
                                 </p>
                                 <p className={`text-sm ${type.textColor} opacity-90 font-medium`}>
@@ -105,7 +136,7 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
                             
                             {/* Total Days - Smaller Display */}
                             <div className="text-center">
-                                <p className={`text-sm ${type.textColor} opacity-90 font-medium`}>
+                                <p className={`text-sm ${balance.status === 'negative' ? 'text-red-300' : type.textColor} opacity-90 font-medium`}>
                                     {balance.sub}
                                 </p>
                             </div>

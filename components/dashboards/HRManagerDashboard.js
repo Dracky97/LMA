@@ -28,6 +28,9 @@ export default function HRManagerDashboard() {
     const [activeReportTab, setActiveReportTab] = useState('generate');
     const [monthlyReport, setMonthlyReport] = useState(null);
     const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+    const [editingUser, setEditingUser] = useState(null);
+    const [showEditBalanceModal, setShowEditBalanceModal] = useState(false);
+    const [editBalanceData, setEditBalanceData] = useState({});
 
     useEffect(() => {
         const usersUnsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
@@ -89,7 +92,7 @@ export default function HRManagerDashboard() {
         try {
             // Clear any previous messages
             setMessage(null);
-            
+
             const requestRef = doc(db, "leaveRequests", requestId);
             const request = allRequests.find(r => r.id === requestId);
             if (!request) {
@@ -97,99 +100,107 @@ export default function HRManagerDashboard() {
             }
 
             if (newStatus === 'Approved') {
+                // Final HR approval - deduct balance and complete the request
                 await updateDoc(requestRef, {
                     hrManagerApproval: 'Approved',
                     status: 'Approved',
                     hrManagerActionBy: userData.name,
+                    hrApprovalDate: new Date().toISOString(),
                     rejectionReason: ''
                 });
 
-                // Validate request data
-                if (!request.userId || !request.type || !request.startDate || !request.endDate) {
-                    throw new Error('Invalid request data');
-                }
-
-                const userRef = doc(db, "users", request.userId);
-                const userDoc = await getDoc(userRef);
-                if (userDoc.exists()) {
-                    const currentData = userDoc.data();
-                    // Convert leave type name to match the balance structure
-                    const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(' ', '');
-
-                    // Validate leave type using shared function
-                    validateLeaveType(leaveType, currentData.gender);
-
-                    // Debug: Log available leave balance keys
-                    console.log('User leave balance keys:', Object.keys(currentData.leaveBalance || {}));
-                    console.log('Looking for leave type:', leaveType);
-                    console.log('Request type:', request.type);
-
-                    // Validate leave type exists in user's balance, if not initialize it to 0
-                    if (!currentData.leaveBalance || !currentData.leaveBalance.hasOwnProperty(leaveType)) {
-                        // Initialize missing leave type to 0
-                        if (!currentData.leaveBalance) {
-                            currentData.leaveBalance = {};
-                        }
-                        currentData.leaveBalance[leaveType] = 0;
-                        
-                        // Update user document with the missing leave type
-                        await updateDoc(userRef, {
-                            [`leaveBalance.${leaveType}`]: 0
-                        });
-                    }
-                    
-                    const currentBalance = currentData.leaveBalance[leaveType];
-                    const startDate = request.startDate.toDate();
-                    const endDate = request.endDate.toDate();
-                    
-                    // Validate dates
-                    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime()) || endDate < startDate) {
-                        throw new Error('Invalid date range');
-                    }
-                    
-                    // Use leaveUnits if available (for half-day support), otherwise calculate from dates
-                    let duration;
-                    if (request.leaveUnits !== undefined && request.leaveUnits > 0) {
-                        duration = request.leaveUnits;
-                    } else {
-                        // Fallback to date calculation for older requests
-                        duration = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
-                    }
-                    
-                    console.log('HR Manager deducting leave:', {
-                        leaveType,
-                        duration,
-                        leaveUnits: request.leaveUnits,
-                        currentBalance,
-                        isPartialDay: request.isPartialDay
-                    });
-                    
-                    // Check if user has enough leave balance
-                    if (currentBalance < duration) {
-                        throw new Error('Insufficient leave balance');
-                    }
-                    
-                    await updateDoc(userRef, {
-                        [`leaveBalance.${leaveType}`]: currentBalance - duration
-                    });
-                }
+                // Deduct the leave balance (this can result in negative balance)
+                await deductLeaveBalance(request);
+                setMessage({ type: 'success', text: 'Leave request finally approved. Balance has been deducted.' });
             } else {
+                // HR rejection
                 await updateDoc(requestRef, {
                     hrManagerApproval: 'Rejected',
                     status: 'Rejected',
                     hrManagerActionBy: userData.name,
+                    hrApprovalDate: new Date().toISOString(),
                     rejectionReason: rejectionReason?.trim() || ''
                 });
+                setMessage({ type: 'success', text: 'Leave request rejected by HR.' });
             }
-            
-            setMessage({ type: 'success', text: `Leave request ${newStatus.toLowerCase()} successfully.` });
         } catch (error) {
             console.error("Error handling final approval:", error);
             setMessage({ type: 'error', text: `Error ${newStatus.toLowerCase()}ing leave request: ${error.message}` });
         }
     };
 
+    const deductLeaveBalance = async (request) => {
+        try {
+            const userRef = doc(db, "users", request.userId);
+            const userDoc = await getDoc(userRef);
+
+            if (!userDoc.exists()) {
+                throw new Error('User not found');
+            }
+
+            const currentData = userDoc.data();
+            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(' ', '');
+
+            if (!currentData.leaveBalance) {
+                currentData.leaveBalance = {};
+            }
+
+            // Initialize missing leave type if needed
+            if (!currentData.leaveBalance.hasOwnProperty(leaveType)) {
+                currentData.leaveBalance[leaveType] = 0;
+            }
+
+            const currentBalance = currentData.leaveBalance[leaveType];
+
+            // Use leaveUnits if available, otherwise calculate from dates
+            const duration = request.leaveUnits !== undefined && request.leaveUnits > 0
+                ? request.leaveUnits
+                : Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
+
+            const newBalance = currentBalance - duration;
+
+            console.log('HR Manager final approval - deducting leave:', {
+                leaveType,
+                duration,
+                currentBalance,
+                newBalance,
+                isPartialDay: request.isPartialDay
+            });
+
+            // Check if any leave balance is going negative and update noPay status
+            const updatedLeaveBalance = { ...currentData.leaveBalance, [leaveType]: newBalance };
+            const hasNegativeBalance = Object.values(updatedLeaveBalance).some(balance => balance < 0);
+            const currentlyOnNoPay = currentData.noPayStatus || false;
+
+            // Update noPay status if transitioning to/from negative balance
+            if (hasNegativeBalance && !currentlyOnNoPay) {
+                // Starting no pay period
+                await updateDoc(userRef, {
+                    [`leaveBalance.${leaveType}`]: newBalance,
+                    noPayStatus: true,
+                    noPayStartDate: new Date().toISOString()
+                });
+            } else if (!hasNegativeBalance && currentlyOnNoPay) {
+                // Ending no pay period
+                await updateDoc(userRef, {
+                    [`leaveBalance.${leaveType}`]: newBalance,
+                    noPayStatus: false,
+                    noPayEndDate: new Date().toISOString()
+                });
+            } else {
+                // No status change needed
+                await updateDoc(userRef, {
+                    [`leaveBalance.${leaveType}`]: newBalance
+                });
+            }
+        } catch (error) {
+            console.error("Error deducting leave balance:", error);
+            throw error;
+        }
+    };
+
     const pendingHRRequests = allRequests.filter(r => r.status === 'Pending HR Approval');
+    const pendingFinalHRRequests = allRequests.filter(r => r.status === 'Pending HR Approval' && r.hrManagerApproval !== 'Approved');
 
     // Function to generate monthly report (25th to 25th)
     const generateMonthlyReport = async () => {
@@ -466,6 +477,46 @@ export default function HRManagerDashboard() {
         return balance % 1 === 0 ? balance.toString() : balance.toFixed(1);
     };
 
+    // Function to open edit balance modal
+    const openEditBalanceModal = (user) => {
+        setEditingUser(user);
+        setEditBalanceData({
+            annualLeave: user.leaveBalance?.annualLeave || 0,
+            sickLeave: user.leaveBalance?.sickLeave || 0,
+            casualLeave: user.leaveBalance?.casualLeave || 0,
+            maternityLeave: user.leaveBalance?.maternityLeave || 0,
+            paternityLeave: user.leaveBalance?.paternityLeave || 0,
+            'leave in-lieu': user.leaveBalance?.['leave in-lieu'] || 0,
+            shortLeave: user.leaveBalance?.shortLeave || 0,
+            other: user.leaveBalance?.other || 0
+        });
+        setShowEditBalanceModal(true);
+    };
+
+    // Function to handle leave balance changes
+    const handleBalanceChange = (leaveType, value) => {
+        setEditBalanceData(prev => ({
+            ...prev,
+            [leaveType]: parseFloat(value) || 0
+        }));
+    };
+
+    // Function to save leave balance changes
+    const saveBalanceChanges = async () => {
+        try {
+            const userRef = doc(db, "users", editingUser.uid || editingUser.id);
+            await updateDoc(userRef, {
+                leaveBalance: editBalanceData
+            });
+            setMessage({ type: 'success', text: `Leave balances updated successfully for ${editingUser.name}` });
+            setShowEditBalanceModal(false);
+            setEditingUser(null);
+        } catch (error) {
+            console.error("Error updating leave balances:", error);
+            setMessage({ type: 'error', text: `Error updating leave balances: ${error.message}` });
+        }
+    };
+
     return (
         <div className="space-y-6">
             {/* My Leave Section */}
@@ -490,7 +541,7 @@ export default function HRManagerDashboard() {
                                 : 'border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-300'
                         }`}
                     >
-                        Requests for Final Approval ({pendingHRRequests.length})
+                        Requests for Final Approval ({pendingFinalHRRequests.length})
                     </button>
                     <button
                         onClick={() => setActiveTab('balances')}
@@ -539,7 +590,7 @@ export default function HRManagerDashboard() {
             <div className="bg-card rounded-lg shadow-sm">
                 {activeTab === 'requests' && (
                     <div className="p-6">
-                        <ManagerRequestsTable requests={pendingHRRequests} users={users} onUpdate={handleFinalApproval} />
+                        <ManagerRequestsTable requests={pendingFinalHRRequests} users={users} onUpdate={handleFinalApproval} isHRView={true} />
                     </div>
                 )}
                 
@@ -583,6 +634,7 @@ export default function HRManagerDashboard() {
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Leave in-lieu</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Short Leave</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Other</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="bg-card divide-y divide-gray-700">
@@ -608,6 +660,17 @@ export default function HRManagerDashboard() {
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.['leave in-lieu'])}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.shortLeave)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.other)}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+                                                <button
+                                                    onClick={() => openEditBalanceModal(user)}
+                                                    className="text-blue-400 hover:text-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-card rounded p-1"
+                                                    title="Edit Leave Balances"
+                                                >
+                                                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                    </svg>
+                                                </button>
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -808,6 +871,138 @@ export default function HRManagerDashboard() {
                     userData={userData}
                     onClose={() => setShowLeaveModal(false)}
                 />
+            )}
+
+            {/* Edit Leave Balance Modal */}
+            {showEditBalanceModal && editingUser && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-card rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                        <div className="p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-medium text-slate-200">Edit Leave Balances - {editingUser.name}</h3>
+                                <button
+                                    onClick={() => {
+                                        setShowEditBalanceModal(false);
+                                        setEditingUser(null);
+                                    }}
+                                    className="text-slate-400 hover:text-slate-200"
+                                >
+                                    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Annual Leave</label>
+                                    <input
+                                        type="number"
+                                        step="0.5"
+                                        value={editBalanceData.annualLeave}
+                                        onChange={(e) => handleBalanceChange('annualLeave', e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Sick Leave</label>
+                                    <input
+                                        type="number"
+                                        step="0.5"
+                                        value={editBalanceData.sickLeave}
+                                        onChange={(e) => handleBalanceChange('sickLeave', e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Casual Leave</label>
+                                    <input
+                                        type="number"
+                                        step="0.5"
+                                        value={editBalanceData.casualLeave}
+                                        onChange={(e) => handleBalanceChange('casualLeave', e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Maternity Leave</label>
+                                    <input
+                                        type="number"
+                                        step="0.5"
+                                        value={editBalanceData.maternityLeave}
+                                        onChange={(e) => handleBalanceChange('maternityLeave', e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Paternity Leave</label>
+                                    <input
+                                        type="number"
+                                        step="0.5"
+                                        value={editBalanceData.paternityLeave}
+                                        onChange={(e) => handleBalanceChange('paternityLeave', e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Leave in-lieu</label>
+                                    <input
+                                        type="number"
+                                        step="0.5"
+                                        value={editBalanceData['leave in-lieu']}
+                                        onChange={(e) => handleBalanceChange('leave in-lieu', e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Short Leave</label>
+                                    <input
+                                        type="number"
+                                        step="0.5"
+                                        value={editBalanceData.shortLeave}
+                                        onChange={(e) => handleBalanceChange('shortLeave', e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Other Leave</label>
+                                    <input
+                                        type="number"
+                                        step="0.5"
+                                        value={editBalanceData.other}
+                                        onChange={(e) => handleBalanceChange('other', e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex justify-end space-x-3 mt-6">
+                                <button
+                                    onClick={() => {
+                                        setShowEditBalanceModal(false);
+                                        setEditingUser(null);
+                                    }}
+                                    className="px-4 py-2 border border-gray-600 text-slate-300 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 transition duration-150 ease-in-out"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={saveBalanceChanges}
+                                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-150 ease-in-out"
+                                >
+                                    Save Changes
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

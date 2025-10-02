@@ -11,26 +11,27 @@ service cloud.firestore {
       allow read: if request.auth != null &&
                      request.auth.uid in resource.data.managerId;
       
-      // Managers can update leave balances when approving leave requests
+      // Managers can update leave balances and noPay status when approving leave requests
       allow update: if request.auth != null &&
                        request.auth.uid == resource.data.managerId &&
-                       // Only allow updating leave balance fields
+                       // Only allow updating leave balance and noPay status fields
                        request.resource.data.diff(resource.data).affectedKeys()
-                       .hasOnly(['leaveBalance']);
+                       .hasOnly(['leaveBalance', 'noPayStatus', 'noPayStartDate', 'noPayEndDate']);
       
       // Allow all authenticated users to read basic user info (needed for dropdowns, etc.)
       allow read: if request.auth != null;
       
       // Allow admins full access to all user data (create, read, update, delete)
       allow read, write: if request.auth != null &&
-                           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin';
+                           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin' ||
+                           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Manager HR';
 
-      // Allow HR Managers to update leave balances for any user
+      // Allow HR Managers to update leave balances and noPay status for any user
       allow update: if request.auth != null &&
                        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Manager HR' &&
-                       // Only allow updating leave balance fields
+                       // Only allow updating leave balance and noPay status fields
                        request.resource.data.diff(resource.data).affectedKeys()
-                       .hasOnly(['leaveBalance']);
+                       .hasOnly(['leaveBalance', 'noPayStatus', 'noPayStartDate', 'noPayEndDate']);
     }
     
     // Leave requests collection rules

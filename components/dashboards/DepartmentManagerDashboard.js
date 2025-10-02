@@ -47,95 +47,143 @@ export default function DepartmentManagerDashboard() {
         try {
             // Clear any previous messages
             setMessage(null);
-            
+
             const requestRef = doc(db, "leaveRequests", requestId);
-            const updateData = {
-                status: newStatus,
-                approvedBy: userData.name,
-                rejectionReason: newStatus === 'Rejected' ? (rejectionReason?.trim() || '') : ''
-            };
-            
-            await updateDoc(requestRef, updateData);
+            const requestDoc = await getDoc(requestRef);
+            const request = requestDoc.data();
 
-            if (newStatus === 'Approved') {
-                const requestDoc = await getDoc(requestRef);
-                const request = requestDoc.data();
-                
-                // Validate request data
-                if (!request || !request.userId || !request.type || !request.startDate || !request.endDate) {
-                    throw new Error('Invalid request data');
-                }
-                
-                const userRef = doc(db, "users", request.userId);
-                const userDoc = await getDoc(userRef);
-                if (userDoc.exists()) {
-                    const currentData = userDoc.data();
-                    // Convert leave type name to match the balance structure
-                    const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(' ', '');
-
-                    // Validate leave type using shared function
-                    validateLeaveType(leaveType, currentData.gender);
-
-                    // Debug: Log available leave balance keys
-                    console.log('User leave balance keys:', Object.keys(currentData.leaveBalance || {}));
-                    console.log('Looking for leave type:', leaveType);
-                    console.log('Request type:', request.type);
-
-                    // Validate leave type exists in user's balance, if not initialize it to 0
-                    if (!currentData.leaveBalance || !currentData.leaveBalance.hasOwnProperty(leaveType)) {
-                        // Initialize missing leave type to 0
-                        if (!currentData.leaveBalance) {
-                            currentData.leaveBalance = {};
-                        }
-                        currentData.leaveBalance[leaveType] = 0;
-                        
-                        // Update user document with the missing leave type
-                        await updateDoc(userRef, {
-                            [`leaveBalance.${leaveType}`]: 0
-                        });
-                    }
-                    
-                    const currentBalance = currentData.leaveBalance[leaveType];
-                    const startDate = request.startDate.toDate();
-                    const endDate = request.endDate.toDate();
-                    
-                    // Validate dates
-                    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime()) || endDate < startDate) {
-                        throw new Error('Invalid date range');
-                    }
-                    
-                    // Use leaveUnits if available (for half-day support), otherwise calculate from dates
-                    let duration;
-                    if (request.leaveUnits !== undefined && request.leaveUnits > 0) {
-                        duration = request.leaveUnits;
-                    } else {
-                        // Fallback to date calculation for older requests
-                        duration = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
-                    }
-                    
-                    console.log('Deducting leave:', {
-                        leaveType,
-                        duration,
-                        leaveUnits: request.leaveUnits,
-                        currentBalance,
-                        isPartialDay: request.isPartialDay
-                    });
-                    
-                    // Check if user has enough leave balance
-                    if (currentBalance < duration) {
-                        throw new Error('Insufficient leave balance');
-                    }
-                    
-                    await updateDoc(userRef, {
-                        [`leaveBalance.${leaveType}`]: currentBalance - duration
-                    });
-                }
+            if (!request) {
+                throw new Error('Request not found');
             }
-            
-            setMessage({ type: 'success', text: `Leave request ${newStatus.toLowerCase()} successfully.` });
+
+            // Check if this approval would result in negative balance
+            const wouldGoNegative = await checkIfRequestWouldGoNegative(request);
+
+            if (newStatus === 'Approved' && wouldGoNegative) {
+                // Request would go negative - escalate to HR for approval
+                await updateDoc(requestRef, {
+                    status: 'Pending HR Approval',
+                    approvedBy: userData.name,
+                    managerApprovalDate: new Date().toISOString(),
+                    rejectionReason: ''
+                });
+                setMessage({ type: 'success', text: 'Request escalated to HR for final approval due to insufficient leave balance.' });
+            } else if (newStatus === 'Approved' && !wouldGoNegative) {
+                // Regular approval - deduct balance immediately
+                await updateDoc(requestRef, {
+                    status: 'Approved',
+                    approvedBy: userData.name,
+                    approvalDate: new Date().toISOString(),
+                    rejectionReason: ''
+                });
+
+                await deductLeaveBalance(request);
+                setMessage({ type: 'success', text: 'Leave request approved successfully.' });
+            } else {
+                // Rejection or other status changes
+                await updateDoc(requestRef, {
+                    status: newStatus,
+                    approvedBy: userData.name,
+                    rejectionReason: newStatus === 'Rejected' ? (rejectionReason?.trim() || '') : '',
+                    rejectionDate: newStatus === 'Rejected' ? new Date().toISOString() : null
+                });
+                setMessage({ type: 'success', text: `Leave request ${newStatus.toLowerCase()} successfully.` });
+            }
         } catch (error) {
             console.error("Error handling approval:", error);
             setMessage({ type: 'error', text: `Error ${newStatus.toLowerCase()}ing leave request: ${error.message}` });
+        }
+    };
+
+    const checkIfRequestWouldGoNegative = async (request) => {
+        try {
+            const userRef = doc(db, "users", request.userId);
+            const userDoc = await getDoc(userRef);
+
+            if (!userDoc.exists()) {
+                throw new Error('User not found');
+            }
+
+            const currentData = userDoc.data();
+            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(' ', '');
+
+            if (!currentData.leaveBalance || !currentData.leaveBalance.hasOwnProperty(leaveType)) {
+                return true; // No balance means it would go negative
+            }
+
+            const currentBalance = currentData.leaveBalance[leaveType];
+
+            // Use leaveUnits if available, otherwise calculate from dates
+            const duration = request.leaveUnits !== undefined && request.leaveUnits > 0
+                ? request.leaveUnits
+                : Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
+
+            return (currentBalance - duration) < 0;
+        } catch (error) {
+            console.error("Error checking negative balance:", error);
+            return true; // Default to requiring HR approval on error
+        }
+    };
+
+    const deductLeaveBalance = async (request) => {
+        try {
+            const userRef = doc(db, "users", request.userId);
+            const userDoc = await getDoc(userRef);
+
+            if (!userDoc.exists()) {
+                throw new Error('User not found');
+            }
+
+            const currentData = userDoc.data();
+            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(' ', '');
+
+            if (!currentData.leaveBalance) {
+                currentData.leaveBalance = {};
+            }
+
+            // Initialize missing leave type if needed
+            if (!currentData.leaveBalance.hasOwnProperty(leaveType)) {
+                currentData.leaveBalance[leaveType] = 0;
+            }
+
+            const currentBalance = currentData.leaveBalance[leaveType];
+
+            // Use leaveUnits if available, otherwise calculate from dates
+            const duration = request.leaveUnits !== undefined && request.leaveUnits > 0
+                ? request.leaveUnits
+                : Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
+
+            const newBalance = currentBalance - duration;
+
+            // Check if any leave balance is going negative and update noPay status
+            const updatedLeaveBalance = { ...currentData.leaveBalance, [leaveType]: newBalance };
+            const hasNegativeBalance = Object.values(updatedLeaveBalance).some(balance => balance < 0);
+            const currentlyOnNoPay = currentData.noPayStatus || false;
+
+            // Update noPay status if transitioning to/from negative balance
+            if (hasNegativeBalance && !currentlyOnNoPay) {
+                // Starting no pay period
+                await updateDoc(userRef, {
+                    [`leaveBalance.${leaveType}`]: newBalance,
+                    noPayStatus: true,
+                    noPayStartDate: new Date().toISOString()
+                });
+            } else if (!hasNegativeBalance && currentlyOnNoPay) {
+                // Ending no pay period
+                await updateDoc(userRef, {
+                    [`leaveBalance.${leaveType}`]: newBalance,
+                    noPayStatus: false,
+                    noPayEndDate: new Date().toISOString()
+                });
+            } else {
+                // No status change needed
+                await updateDoc(userRef, {
+                    [`leaveBalance.${leaveType}`]: newBalance
+                });
+            }
+        } catch (error) {
+            console.error("Error deducting leave balance:", error);
+            throw error;
         }
     };
 
@@ -154,7 +202,7 @@ export default function DepartmentManagerDashboard() {
                     </div>
                 )}
                 <h2 className="text-xl font-semibold text-slate-200 mb-4">Team Requests for Your Approval ({pendingRequests.length})</h2>
-                <ManagerRequestsTable requests={pendingRequests} users={users} onUpdate={handleApproval} />
+                <ManagerRequestsTable requests={pendingRequests} users={users} onUpdate={handleApproval} isHRView={false} />
             </div>
             <div className="bg-card p-6 rounded-lg shadow-sm">
                 <h2 className="text-xl font-semibold text-slate-200 mb-4">Team Leave History</h2>

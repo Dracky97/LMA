@@ -40,6 +40,10 @@ exports.onLeaveRequestCreate = onDocumentCreated({
     const managerData = managerDoc.data();
     const employeeData = employeeDoc.data();
 
+    // Format dates for display
+    const startDate = new Date(requestData.startDate._seconds * 1000).toLocaleDateString();
+    const endDate = new Date(requestData.endDate._seconds * 1000).toLocaleDateString();
+
     const mailOptions = {
         from: '"HRMS Portal" <hrms@aibs.edu.lk>',
         to: managerData.email,
@@ -55,6 +59,7 @@ exports.onLeaveRequestCreate = onDocumentCreated({
                 <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3b82f6;">
                     <p style="margin: 5px 0;"><strong>Employee:</strong> <span style="color: #1e293b; font-weight: bold;">${employeeData.name}</span></p>
                     <p style="margin: 5px 0;"><strong>Leave Type:</strong> <span style="color: #1e293b; font-weight: bold;">${requestData.type}</span></p>
+                    <p style="margin: 5px 0;"><strong>Dates:</strong> <span style="color: #1e293b; font-weight: bold;">${startDate} - ${endDate}</span></p>
                     <p style="margin: 5px 0;"><strong>Duration:</strong> <span style="color: #1e293b; font-weight: bold;">${requestData.totalDays || requestData.leaveUnits || 'N/A'} day(s)</span></p>
                     <p style="margin: 5px 0;"><strong>Department:</strong> ${employeeData.department || 'N/A'}</p>
                     ${requestData.reason ? `<p style="margin: 5px 0;"><strong>Reason:</strong> ${requestData.reason}</p>` : ''}
@@ -62,7 +67,7 @@ exports.onLeaveRequestCreate = onDocumentCreated({
                 </div>
 
                 <div style="text-align: center; margin: 30px 0;">
-                    <a href="https://leave-management-app-20ee9.firebaseapp.com/team-requests"
+                    <a href="https://hrms.aibs.edu.lk/team-requests"
                        style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
                         Review Team Requests
                     </a>
@@ -123,11 +128,33 @@ exports.onLeaveRequestUpdate = onDocumentUpdated({
     }
     const employeeData = employeeDoc.data();
 
+    // Format dates for display
+    const startDate = new Date(afterData.startDate._seconds * 1000).toLocaleDateString();
+    const endDate = new Date(afterData.endDate._seconds * 1000).toLocaleDateString();
+
     const mailOptions = {
         from: '"HRMS Portal" <hrms@aibs.edu.lk>',
         to: employeeData.email,
         subject: `Update on your leave request: ${afterData.status}`,
-        html: `<p>Hello ${employeeData.name},</p><p>Your leave request has been updated. The new status is: <strong>${afterData.status}</strong>.</p>${afterData.status === 'Rejected' && afterData.rejectionReason ? `<p><strong>Reason for rejection:</strong> ${afterData.rejectionReason}</p>` : ''}<p>You can view the details by logging into the HR Portal.</p>`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #1e293b; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Leave Request Update</h2>
+                <p>Hello <strong>${employeeData.name}</strong>,</p>
+                <p>Your leave request for <strong>${startDate} - ${endDate}</strong> has been updated. The new status is: <strong>${afterData.status}</strong>.</p>
+                ${afterData.status === 'Rejected' && afterData.rejectionReason ? `<p><strong>Reason for rejection:</strong> ${afterData.rejectionReason}</p>` : ''}
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="https://hrms.aibs.edu.lk/dashboard"
+                       style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+                        View Your Dashboard
+                    </a>
+                </div>
+                <p>You can view the full details by logging into the HR Portal.</p>
+                <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+                <p style="color: #64748b; font-size: 12px; text-align: center;">
+                    This is an automated message from the HRMS Portal. Please do not reply to this email.
+                </p>
+            </div>
+        `,
     };
 
     try {

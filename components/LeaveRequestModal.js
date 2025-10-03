@@ -277,8 +277,8 @@ export default function LeaveRequestModal({ userData, onClose }) {
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
-            <div className="bg-card rounded-lg shadow-xl w-full max-w-lg">
-                <div className="p-6">
+            <div className="bg-card rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col mx-2 sm:mx-4">
+                <div className="p-6 overflow-y-auto flex-1">
                     <h2 className="text-xl font-bold text-slate-200 mb-4">Apply for Leave</h2>
                     {error && <div className="mb-4 text-red-400 bg-red-900/30 p-3 rounded">{error}</div>}
                     <form onSubmit={handleSubmit}>

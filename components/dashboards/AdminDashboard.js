@@ -627,8 +627,8 @@ export default function AdminDashboard() {
             
             {showAddUserForm && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md">
-                        <div className="p-6">
+                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col mx-2 sm:mx-4">
+                        <div className="p-6 overflow-y-auto flex-1">
                             <div className="flex justify-between items-center mb-4">
                                 <h3 className="text-lg font-medium text-slate-200">Add New User</h3>
                                 <button
@@ -834,8 +834,8 @@ export default function AdminDashboard() {
             {/* Password Confirmation Dialog */}
             {showPasswordDialog && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md">
-                        <div className="p-6">
+                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col mx-2 sm:mx-4">
+                        <div className="p-6 overflow-y-auto flex-1">
                             <div className="flex justify-between items-center mb-4">
                                 <h3 className="text-lg font-medium text-slate-200">Confirm Admin Password</h3>
                                 <button
@@ -1169,8 +1169,8 @@ export default function AdminDashboard() {
             {/* Status Change Modal */}
             {showStatusChangeModal && statusChangeUser && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md">
-                        <div className="p-6">
+                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col mx-2 sm:mx-4">
+                        <div className="p-6 overflow-y-auto flex-1">
                             <div className="flex justify-between items-center mb-4">
                                 <h3 className="text-lg font-medium text-slate-200">Change Employee Status</h3>
                                 <button
@@ -1257,8 +1257,8 @@ export default function AdminDashboard() {
             {/* Joined Date Change Modal */}
             {showJoinedDateModal && joinedDateUser && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md">
-                        <div className="p-6">
+                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col mx-2 sm:mx-4">
+                        <div className="p-6 overflow-y-auto flex-1">
                             <div className="flex justify-between items-center mb-4">
                                 <h3 className="text-lg font-medium text-slate-200">Change Joined Date</h3>
                                 <button
@@ -1350,8 +1350,8 @@ export default function AdminDashboard() {
             {/* Delete Confirmation Modal */}
             {showDeleteConfirm && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md">
-                        <div className="p-6">
+                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col mx-2 sm:mx-4">
+                        <div className="p-6 overflow-y-auto flex-1">
                             <div className="flex items-center mb-4">
                                 <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
                                     <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">

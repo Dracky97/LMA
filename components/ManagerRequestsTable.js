@@ -89,8 +89,8 @@ export default function ManagerRequestsTable({ requests, users, onUpdate, isHRVi
             {/* Rejection Reason Modal */}
             {showRejectModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
-                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md">
-                        <div className="p-6">
+                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col mx-2 sm:mx-4">
+                        <div className="p-6 overflow-y-auto flex-1">
                             <h3 className="text-lg font-medium text-slate-200 mb-4">Reject Leave Request</h3>
                             
                             <div className="mb-4">

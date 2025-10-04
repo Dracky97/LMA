@@ -92,59 +92,37 @@ export const AuthProvider = ({ children }) => {
         try {
             const userCredential = await createUserWithEmailAndPassword(auth, email, password);
             const newUser = userCredential.user;
-            // Calculate prorated annual leave based on start date
+
             const currentDate = new Date();
-            const currentMonth = currentDate.getMonth(); // 0-11 (Jan-Dec)
 
-            // Prorated annual leave based on quarter
-            let annualLeave = 14; // Default for Jan-Mar
-            if (currentMonth >= 3 && currentMonth <= 5) { // Apr-Jun
-                annualLeave = 10;
-            } else if (currentMonth >= 6 && currentMonth <= 8) { // Jul-Sep
-                annualLeave = 7;
-            } else if (currentMonth >= 9) { // Oct-Dec
-                annualLeave = 0; // Updated from 4 to 0 days
-            }
-
-            // Set gender-specific leave balances
-            let leaveBalance = {
-                annualLeave,
-                sickLeave: 7,
-                casualLeave: 7,
-                'leave in-lieu': 0,
-                shortLeave: 12,
-                other: 0
-            };
-
-            if (gender === 'female') {
-                // Default maternity leave for first and second child
-                leaveBalance = { ...leaveBalance, maternityLeave: 84 };
-            } else if (gender === 'male') {
-                leaveBalance = { ...leaveBalance, paternityLeave: 3 };
-            }
-
-            // Calculate next performance evaluation date (every 3 months from joined date)
-            const evaluationDate = joinedDate ? new Date(joinedDate) : currentDate;
+            // Calculate next performance evaluation date (every 3 months from joined date or current date)
+            const evaluationStartDate = joinedDate ? new Date(joinedDate) : currentDate;
+            const evaluationDate = new Date(evaluationStartDate);
             evaluationDate.setMonth(evaluationDate.getMonth() + 3);
+
+            // No default leave balances or allocations at signup
+            const leaveBalance = {};
+            const leaveAllocations = {};
 
             return await setDoc(doc(db, 'users', newUser.uid), {
                 name,
                 email,
                 role: 'Employee',
-                isManager: false, // <-- New flag, only Admins can change this
+                isManager: false,
                 department,
                 managerId: managerId || null,
-                employeeNumber, // Add employee number field
-                gender, // Add gender field
-                designation, // Add designation field
-                employeeStatus, // Add employee status field (permanent/probation/intern)
-                joinedDate: joinedDate || currentDate.toISOString(), // Add joined date field
-                nextEvaluationDate: evaluationDate.toISOString(), // Add next evaluation date
+                employeeNumber,
+                gender,
+                designation,
+                employeeStatus,
+                joinedDate: joinedDate || currentDate.toISOString(),
+                nextEvaluationDate: evaluationDate.toISOString(),
                 personalDetails: { phone: '', address: '', dob: birthday || '' },
                 education: [],
                 qualifications: [],
                 socialMedia: { linkedin: '', twitter: '' },
                 leaveBalance,
+                leaveAllocations,
                 createdAt: currentDate,
             });
         } catch (error) {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { LEAVE_BALANCE_TYPES, getFilteredLeaveBalanceTypes, getLeaveAllocation } from '../lib/leaveTypes';
+import { LEAVE_BALANCE_TYPES, getFilteredLeaveBalanceTypes } from '../lib/leaveTypes';
 
 export default function LeaveBalanceCard({ balances, gender, userData }) {
     if (!balances) {
@@ -14,13 +14,8 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
 
     const formatLeaveBalance = (type) => {
         const remaining = balances[type.key] || 0;
-        const standardAllocation = getLeaveAllocation(type.key, userData);
-        
-        // Skip leave types with no remaining balance and no standard allocation
-        if (remaining === 0 && standardAllocation === 0) {
-            return null; // Don't display this leave type
-        }
-        
+        const allocation = userData?.leaveAllocations?.[type.key];
+
         // Helper function to format numbers (show decimals only if needed)
         const formatNumber = (num) => {
             return num % 1 === 0 ? num.toString() : num.toFixed(1);
@@ -32,19 +27,8 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
             const absNum = Math.abs(num);
             return absNum === 1 ? `${formatted} day` : `${formatted} days`;
         };
-        
-        // For leave types with no standard allocation but have remaining days
-        if (standardAllocation === 0) {
-            return {
-                mainNumber: formatDaysText(remaining),
-                mainLabel: 'available',
-                sub: '',
-                showProgress: false,
-                shouldDisplay: remaining > 0
-            };
-        }
-        
-        // Handle negative balances
+
+        // Handle negative balances first
         if (remaining < 0) {
             return {
                 mainNumber: formatDaysText(remaining),
@@ -56,18 +40,32 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
             };
         }
 
-        // If remaining balance is higher than standard allocation, use remaining as the base
-        // This handles cases where users might have carried over leave or have different allocations
-        const actualTotal = Math.max(remaining, standardAllocation);
-        const used = Math.max(0, actualTotal - remaining);
+        // Skip leave types with no remaining balance and no manual allocation
+        if ((remaining === 0 || remaining === undefined) && (allocation === undefined || allocation === 0)) {
+            return null; // Don't display this leave type
+        }
 
-        // Calculate percentage for progress indication
-        const percentageUsed = actualTotal > 0 ? (used / actualTotal) * 100 : 0;
+        // For accrual types or when no manual allocation is provided, show remaining with no progress
+        if (allocation === undefined || allocation === 0) {
+            const isAccruingType = (type.key === 'leave in-lieu' || type.key === 'other');
+            return {
+                mainNumber: formatDaysText(remaining),
+                mainLabel: 'Taken',
+                sub: isAccruingType ? 'Accrued only' : '',
+                showProgress: false,
+                shouldDisplay: remaining > 0
+            };
+        }
+
+        // Use the manually configured allocation as the total
+        const total = typeof allocation === 'number' ? allocation : 0;
+        const used = Math.max(0, total - remaining);
+        const percentageUsed = total > 0 ? (used / total) * 100 : 0;
 
         return {
             mainNumber: formatDaysText(remaining),
             mainLabel: 'Remaining',
-            sub: `${formatDaysText(actualTotal)} total`,
+            sub: `${formatDaysText(total)} total`,
             showProgress: true,
             percentage: percentageUsed,
             status: remaining <= 2 && remaining > 0 ? 'low' : 'good',
@@ -83,10 +81,19 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
         }
     };
 
-    // Filter out leave types that shouldn't be displayed
+    // Desired display order:
+    // Annual, Casual, Sick, Short, Leave in-lieu, Other, Maternity/Paternity (gender-filtered)
+    const ORDER = ['annualLeave', 'casualLeave', 'sickLeave', 'shortLeave', 'leave in-lieu', 'other', 'maternityLeave', 'paternityLeave'];
+
+    // Filter out leave types that shouldn't be displayed, then sort to desired order
     const displayableLeaveTypes = filteredLeaveTypes
         .map(type => ({ ...type, balance: formatLeaveBalance(type) }))
-        .filter(type => type.balance && type.balance.shouldDisplay);
+        .filter(type => type.balance && type.balance.shouldDisplay)
+        .sort((a, b) => {
+            const ai = ORDER.indexOf(a.key);
+            const bi = ORDER.indexOf(b.key);
+            return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+        });
 
     return (
         <div className="bg-card p-6 rounded-lg shadow-sm">
@@ -141,16 +148,15 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
                                 </p>
                             </div>
                             
-                            {balance.showProgress && (
-                                <div className="mt-4">
-                                    <div className="w-full bg-gray-700 rounded-full h-2.5">
-                                        <div
-                                            className={`h-2.5 rounded-full ${getProgressColor(balance.status)} transition-all duration-300`}
-                                            style={{ width: `${Math.min(100, balance.percentage)}%` }}
-                                        ></div>
-                                    </div>
+                            {/* Reserve progress bar space for alignment; hide bar when not applicable */}
+                            <div className="mt-4">
+                                <div className="w-full bg-gray-700 rounded-full h-2.5">
+                                    <div
+                                        className={`h-2.5 rounded-full ${balance.showProgress ? getProgressColor(balance.status) : ''} transition-all duration-300 ${balance.showProgress ? '' : 'opacity-0'}`}
+                                        style={{ width: balance.showProgress ? `${Math.min(100, balance.percentage)}%` : '100%' }}
+                                    ></div>
                                 </div>
-                            )}
+                            </div>
                         </div>
                     );
                 })}

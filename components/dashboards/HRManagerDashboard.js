@@ -186,13 +186,16 @@ export default function HRManagerDashboard() {
                 ? request.leaveUnits
                 : Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
 
-            const newBalance = currentBalance - duration;
+            // For 'leave in-lieu' and 'other', there is no total allocation; approved requests should accumulate (add up)
+            const isAccruingType = (leaveType === 'leave in-lieu' || leaveType === 'other');
+            const newBalance = isAccruingType ? currentBalance + duration : currentBalance - duration;
 
-            console.log('HR Manager final approval - deducting leave:', {
+            console.log('HR Manager final approval - updating leave:', {
                 leaveType,
                 duration,
                 currentBalance,
                 newBalance,
+                isAccruingType,
                 isPartialDay: request.isPartialDay
             });
 
@@ -524,15 +527,13 @@ export default function HRManagerDashboard() {
             'leave in-lieu': user.leaveBalance?.['leave in-lieu'] || 0,
             shortLeave: user.leaveBalance?.shortLeave || 0,
             other: user.leaveBalance?.other || 0,
-            // Total leave allocations (custom totals per user)
-            annualLeaveTotal: user.leaveAllocations?.annualLeave || 14,
-            sickLeaveTotal: user.leaveAllocations?.sickLeave || 7,
-            casualLeaveTotal: user.leaveAllocations?.casualLeave || 7,
-            maternityLeaveTotal: user.leaveAllocations?.maternityLeave || 84,
-            paternityLeaveTotal: user.leaveAllocations?.paternityLeave || 3,
-            'leave in-lieuTotal': user.leaveAllocations?.['leave in-lieu'] || 0,
-            shortLeaveTotal: user.leaveAllocations?.shortLeave || 12,
-            otherTotal: user.leaveAllocations?.other || 0
+            // Total leave allocations (custom totals per user) - no defaults
+            annualLeaveTotal: user.leaveAllocations?.annualLeave ?? 0,
+            sickLeaveTotal: user.leaveAllocations?.sickLeave ?? 0,
+            casualLeaveTotal: user.leaveAllocations?.casualLeave ?? 0,
+            maternityLeaveTotal: user.leaveAllocations?.maternityLeave ?? 0,
+            paternityLeaveTotal: user.leaveAllocations?.paternityLeave ?? 0,
+            shortLeaveTotal: user.leaveAllocations?.shortLeave ?? 0
         });
         setShowEditBalanceModal(true);
     };
@@ -577,15 +578,14 @@ export default function HRManagerDashboard() {
             };
 
             // Prepare total leave allocations (custom totals per user)
+            // 'leave in-lieu' and 'other' do not have total allocations; exclude them from allocations
             const leaveAllocations = {
-                annualLeave: editBalanceData.annualLeaveTotal || 14,
-                sickLeave: editBalanceData.sickLeaveTotal || 7,
-                casualLeave: editBalanceData.casualLeaveTotal || 7,
-                maternityLeave: editBalanceData.maternityLeaveTotal || 84,
-                paternityLeave: editBalanceData.paternityLeaveTotal || 3,
-                'leave in-lieu': editBalanceData['leave in-lieuTotal'] || 0,
-                shortLeave: editBalanceData.shortLeaveTotal || 12,
-                other: editBalanceData.otherTotal || 0
+                annualLeave: editBalanceData.annualLeaveTotal || 0,
+                sickLeave: editBalanceData.sickLeaveTotal || 0,
+                casualLeave: editBalanceData.casualLeaveTotal || 0,
+                maternityLeave: editBalanceData.maternityLeaveTotal || 0,
+                paternityLeave: editBalanceData.paternityLeaveTotal || 0,
+                shortLeave: editBalanceData.shortLeaveTotal || 0
             };
 
             console.log('Final data to update:', { leaveBalance, leaveAllocations });
@@ -1138,16 +1138,6 @@ export default function HRManagerDashboard() {
                                             />
                                         </div>
 
-                                        <div>
-                                            <label className="block text-sm font-medium text-slate-300 mb-1">Leave in-lieu Total</label>
-                                            <input
-                                                type="number"
-                                                step="0.5"
-                                                value={editBalanceData['leave in-lieuTotal']}
-                                                onChange={(e) => handleBalanceChange('leave in-lieuTotal', e.target.value)}
-                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-green-500"
-                                            />
-                                        </div>
 
                                         <div>
                                             <label className="block text-sm font-medium text-slate-300 mb-1">Short Leave Total</label>
@@ -1160,16 +1150,6 @@ export default function HRManagerDashboard() {
                                             />
                                         </div>
 
-                                        <div>
-                                            <label className="block text-sm font-medium text-slate-300 mb-1">Other Leave Total</label>
-                                            <input
-                                                type="number"
-                                                step="0.5"
-                                                value={editBalanceData.otherTotal}
-                                                onChange={(e) => handleBalanceChange('otherTotal', e.target.value)}
-                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-green-500"
-                                            />
-                                        </div>
                                     </div>
                                 </div>
                             </div>

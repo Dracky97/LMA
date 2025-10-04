@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { getFirestore, collection, onSnapshot, doc, updateDoc, writeBatch } from 'firebase/firestore';
 import { app } from '../../lib/firebase-client';
 import { useAuth } from '../../context/AuthContext';
-import { getAnnualLeaveAllocation } from '../../lib/leaveTypes';
 
 const db = getFirestore(app);
 
@@ -257,16 +256,25 @@ export default function AdminDashboard() {
             gender: user.gender || '',
             managerId: user.managerId || '',
             personalDetails: user.personalDetails || { phone: '', address: '', dob: '' },
-            leaveBalance: { ...user.leaveBalance } || {},
-            leaveAllocations: { ...user.leaveAllocations } || {
-                annualLeave: 14,
-                sickLeave: 7,
-                casualLeave: 7,
-                maternityLeave: 84,
-                paternityLeave: 3,
-                'leave in-lieu': 0,
-                shortLeave: 12,
-                other: 0
+            leaveBalance: {
+                annualLeave: user.leaveBalance?.annualLeave ?? 0,
+                sickLeave: user.leaveBalance?.sickLeave ?? 0,
+                casualLeave: user.leaveBalance?.casualLeave ?? 0,
+                maternityLeave: user.leaveBalance?.maternityLeave ?? 0,
+                paternityLeave: user.leaveBalance?.paternityLeave ?? 0,
+                'leave in-lieu': user.leaveBalance?.['leave in-lieu'] ?? 0,
+                shortLeave: user.leaveBalance?.shortLeave ?? 0,
+                other: user.leaveBalance?.other ?? 0
+            },
+            leaveAllocations: {
+                annualLeave: user.leaveAllocations?.annualLeave ?? 0,
+                sickLeave: user.leaveAllocations?.sickLeave ?? 0,
+                casualLeave: user.leaveAllocations?.casualLeave ?? 0,
+                maternityLeave: user.leaveAllocations?.maternityLeave ?? 0,
+                paternityLeave: user.leaveAllocations?.paternityLeave ?? 0,
+                'leave in-lieu': user.leaveAllocations?.['leave in-lieu'] ?? 0,
+                shortLeave: user.leaveAllocations?.shortLeave ?? 0,
+                other: user.leaveAllocations?.other ?? 0
             }
         });
         setShowEditModal(true);
@@ -317,9 +325,12 @@ export default function AdminDashboard() {
             console.log('User document reference:', userDocRef.path);
 
             // Prepare update data with only the fields we want to update
+            const sanitizedAllocations = Object.fromEntries(
+                Object.entries(editUserData.leaveAllocations || {}).filter(([k]) => k !== 'leave in-lieu' && k !== 'other')
+            );
             const updateData = {
                 leaveBalance: editUserData.leaveBalance || {},
-                leaveAllocations: editUserData.leaveAllocations || {}
+                leaveAllocations: sanitizedAllocations
             };
 
             // Update isManager flag based on role if role is being changed
@@ -443,25 +454,20 @@ export default function AdminDashboard() {
             users.forEach(user => {
                 const userRef = doc(db, 'users', user.id);
 
-                // Calculate new annual leave allocation
-                const newAnnualLeave = getAnnualLeaveAllocation(user.createdAt);
-
-                // Reset leave balances to standard allocations
-                const resetBalances = {
-                    annualLeave: newAnnualLeave,
-                    sickLeave: 7,
-                    casualLeave: 7,
-                    'leave in-lieu': 0,
-                    shortLeave: 12,
-                    other: 0
-                };
-
-                // Add gender-specific leaves
-                if (user.gender === 'female') {
-                    resetBalances.maternityLeave = 84;
-                } else if (user.gender === 'male') {
-                    resetBalances.paternityLeave = 3;
-                }
+                // Reset leave balances based on each user's configured allocations
+                // Preserve accrual types: 'leave in-lieu' and 'other' should not be reset to allocations
+                const allocations = user.leaveAllocations || {};
+                const currentBalances = user.leaveBalance || {};
+                const existingKeys = Object.keys({ ...currentBalances, ...allocations });
+                const resetBalances = {};
+                existingKeys.forEach((key) => {
+                    if (key === 'leave in-lieu' || key === 'other') {
+                        // Preserve current accrued balances for these types
+                        resetBalances[key] = currentBalances[key] ?? 0;
+                    } else {
+                        resetBalances[key] = allocations[key] ?? 0;
+                    }
+                });
 
 
                 batch.update(userRef, { leaveBalance: resetBalances });
@@ -493,7 +499,7 @@ export default function AdminDashboard() {
                 <div className="flex justify-between items-center mb-4">
                     <div>
                         <h2 className="text-xl font-semibold text-slate-200">System Management</h2>
-<p className="text-sm text-slate-400 mt-1">Reset all users&apos; leave balances to annual allocations</p>
+<p className="text-sm text-slate-400 mt-1">Reset all users&apos; leave balances to configured allocations (accrual types preserved)</p>
                     </div>
                     <button
                         onClick={handleResetAllLeaveBalances}
@@ -1099,7 +1105,9 @@ export default function AdminDashboard() {
 
                                     <h4 className="text-md font-semibold text-slate-300 mt-6">Total Leave Allocations (Annual Entitlements)</h4>
 
-                                    {Object.entries(editUserData.leaveAllocations || {}).map(([leaveType, allocation]) => (
+                                    {Object.entries(editUserData.leaveAllocations || {})
+                                        .filter(([leaveType]) => leaveType !== 'leave in-lieu' && leaveType !== 'other')
+                                        .map(([leaveType, allocation]) => (
                                         <div key={`allocation-${leaveType}`}>
                                             <label className="block text-sm font-medium text-slate-300 mb-1 capitalize">
                                                 {leaveType.replace(/([A-Z])/g, ' $1').trim()} Total

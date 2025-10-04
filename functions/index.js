@@ -1,3 +1,5 @@
+// File: functions/index.js
+
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onRequest } = require("firebase-functions/v2/https");
@@ -8,18 +10,132 @@ const nodemailer = require("nodemailer");
 admin.initializeApp();
 const db = admin.firestore();
 
+// -----------------------------------------------------------
+// EMAIL TEMPLATES
+// -----------------------------------------------------------
+
+// Template for new leave requests sent to the manager
+const leaveRequestTemplate = (managerName, employeeName, requestData, startDate, endDate, appliedDate) => `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #1e293b; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">New Leave Request</h2>
+
+        <p>Hello <strong>${managerName}</strong>,</p>
+
+        <p><strong>${employeeName}</strong> has submitted a new leave request for your approval.</p>
+
+        <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3b82f6;">
+            <p style="margin: 5px 0;"><strong>Employee:</strong> <span style="color: #1e293b; font-weight: bold;">${employeeName}</span></p>
+            <p style="margin: 5px 0;"><strong>Leave Type:</strong> <span style="color: #1e293b; font-weight: bold;">${requestData.type}</span></p>
+            <p style="margin: 5px 0;"><strong>Dates:</strong> <span style="color: #1e293b; font-weight: bold;">${startDate} - ${endDate}</span></p>
+            <p style="margin: 5px 0;"><strong>Duration:</strong> <span style="color: #1e293b; font-weight: bold;">${requestData.leaveUnits || 'N/A'} day(s)</span></p>
+            <p style="margin: 5px 0;"><strong>Department:</strong> ${requestData.department || 'N/A'}</p>
+            ${requestData.reason ? `<p style="margin: 5px 0;"><strong>Reason:</strong> ${requestData.reason}</p>` : ''}
+            <p style="margin: 5px 0;"><strong>Applied On:</strong> ${appliedDate}</p>
+        </div>
+
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="https://hrms.aibs.edu.lk/team-requests"
+               style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+                Review Team Requests
+            </a>
+        </div>
+
+        <p style="color: #64748b; font-size: 14px;">
+            You can also log in to the HR Portal and navigate to "Team Requests" to review this and other pending requests.
+        </p>
+
+        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+
+        <p style="color: #64748b; font-size: 12px; text-align: center;">
+            This is an automated message from the HRMS Portal. Please do not reply to this email.
+        </p>
+    </div>
+`;
+
+// Template for leave status updates sent to the employee
+const leaveUpdateTemplate = (employeeName, startDate, endDate, status, rejectionReason) => `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #1e293b; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Leave Request Update</h2>
+        <p>Hello <strong>${employeeName}</strong>,</p>
+        <p>Your leave request for <strong>${startDate} - ${endDate}</strong> has been updated. The new status is: <strong>${status}</strong>.</p>
+        ${rejectionReason ? `<p><strong>Reason for rejection:</strong> ${rejectionReason}</p>` : ''}
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="https://hrms.aibs.edu.lk/dashboard"
+               style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+                View Your Dashboard
+            </a>
+        </div>
+        <p>You can view the full details by logging into the HR Portal.</p>
+        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+        <p style="color: #64748b; font-size: 12px; text-align: center;">
+            This is an automated message from the HRMS Portal. Please do not reply to this email.
+        </p>
+    </div>
+`;
+
+// Template for evaluation reminders sent to employee and HR
+const evaluationReminderTemplate = (recipientType, userData, hrData) => {
+    const evaluationDate = new Date(userData.nextEvaluationDate).toLocaleDateString();
+    
+    if (recipientType === 'employee') {
+        return `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #1e293b; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Performance Evaluation Reminder</h2>
+                <p>Hello <strong>${userData.name}</strong>,</p>
+                <p>This is a reminder that your performance evaluation is scheduled for <strong>${evaluationDate}</strong> (3 days from now).</p>
+                <p>Please prepare any relevant documentation or feedback you would like to discuss during your evaluation.</p>
+                <p>If you have any questions, please contact your HR manager.</p>
+                <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+                <p style="color: #64748b; font-size: 12px; text-align: center;">
+                    This is an automated message from the HRMS Portal. Please do not reply to this email.
+                </p>
+            </div>
+        `;
+    }
+
+    if (recipientType === 'hr' && hrData) {
+        return `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #1e293b; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Performance Evaluation Reminder</h2>
+                <p>Hello <strong>${hrData.name}</strong>,</p>
+                <p>This is a reminder that <strong>${userData.name}</strong>'s performance evaluation is scheduled for <strong>${evaluationDate}</strong> (3 days from now).</p>
+                <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3b82f6;">
+                    <p style="margin: 5px 0;"><strong>Employee:</strong> <span style="color: #1e293b; font-weight: bold;">${userData.name}</span></p>
+                    <p style="margin: 5px 0;"><strong>Department:</strong> <span style="color: #1e293b; font-weight: bold;">${userData.department || 'N/A'}</span></p>
+                    <p style="margin: 5px 0;"><strong>Current Status:</strong> <span style="color: #1e293b; font-weight: bold;">${userData.employeeStatus || 'Not set'}</span></p>
+                    <p style="margin: 5px 0;"><strong>Joined Date:</strong> <span style="color: #1e293b; font-weight: bold;">${userData.joinedDate ? new Date(userData.joinedDate).toLocaleDateString() : 'Not set'}</span></p>
+                </div>
+                <p>Please ensure the evaluation is conducted on time and update the employee's status if necessary.</p>
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="https://hrms.aibs.edu.lk/admin-dashboard"
+                       style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+                        Go to Admin Dashboard
+                    </a>
+                </div>
+                <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+                <p style="color: #64748b; font-size: 12px; text-align: center;">
+                    This is an automated message from the HRMS Portal. Please do not reply to this email.
+                </p>
+            </div>
+        `;
+    }
+};
+
+// -----------------------------------------------------------
+// CLOUD FUNCTIONS
+// -----------------------------------------------------------
+
 exports.onLeaveRequestCreate = onDocumentCreated({
     document: "leaveRequests/{requestId}",
     region: "asia-southeast1"
 }, async (event) => {
-    // Initialize transporter using new environment variables
     const transporter = nodemailer.createTransport({
         host: "mail.aibs.edu.lk",
         port: 465,
-        secure: true, // Use true for port 465
+        secure: true,
         auth: {
-            user: process.env.EMAIL_USER, // Correct v2 method
-            pass: process.env.EMAIL_PASS  // Correct v2 method
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS
         }
     });
 
@@ -43,47 +159,13 @@ exports.onLeaveRequestCreate = onDocumentCreated({
     // Format dates for display
     const startDate = new Date(requestData.startDate._seconds * 1000).toLocaleDateString();
     const endDate = new Date(requestData.endDate._seconds * 1000).toLocaleDateString();
+    const appliedDate = new Date(requestData.appliedOn._seconds * 1000).toLocaleDateString();
 
     const mailOptions = {
         from: '"HRMS Portal" <hrms@aibs.edu.lk>',
         to: managerData.email,
         subject: `New Leave Request from ${employeeData.name}`,
-        html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h2 style="color: #1e293b; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">New Leave Request</h2>
-
-                <p>Hello <strong>${managerData.name}</strong>,</p>
-
-                <p><strong>${employeeData.name}</strong> has submitted a new leave request for your approval.</p>
-
-                <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3b82f6;">
-                    <p style="margin: 5px 0;"><strong>Employee:</strong> <span style="color: #1e293b; font-weight: bold;">${employeeData.name}</span></p>
-                    <p style="margin: 5px 0;"><strong>Leave Type:</strong> <span style="color: #1e293b; font-weight: bold;">${requestData.type}</span></p>
-                    <p style="margin: 5px 0;"><strong>Dates:</strong> <span style="color: #1e293b; font-weight: bold;">${startDate} - ${endDate}</span></p>
-                    <p style="margin: 5px 0;"><strong>Duration:</strong> <span style="color: #1e293b; font-weight: bold;">${requestData.totalDays || requestData.leaveUnits || 'N/A'} day(s)</span></p>
-                    <p style="margin: 5px 0;"><strong>Department:</strong> ${employeeData.department || 'N/A'}</p>
-                    ${requestData.reason ? `<p style="margin: 5px 0;"><strong>Reason:</strong> ${requestData.reason}</p>` : ''}
-                    <p style="margin: 5px 0;"><strong>Applied On:</strong> ${new Date(requestData.appliedOn._seconds * 1000).toLocaleDateString()}</p>
-                </div>
-
-                <div style="text-align: center; margin: 30px 0;">
-                    <a href="https://hrms.aibs.edu.lk/team-requests"
-                       style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
-                        Review Team Requests
-                    </a>
-                </div>
-
-                <p style="color: #64748b; font-size: 14px;">
-                    You can also log in to the HR Portal and navigate to "Team Requests" to review this and other pending requests.
-                </p>
-
-                <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
-
-                <p style="color: #64748b; font-size: 12px; text-align: center;">
-                    This is an automated message from the HRMS Portal. Please do not reply to this email.
-                </p>
-            </div>
-        `,
+        html: leaveRequestTemplate(managerData.name, employeeData.name, requestData, startDate, endDate, appliedDate)
     };
 
     try {
@@ -98,14 +180,13 @@ exports.onLeaveRequestUpdate = onDocumentUpdated({
     document: "leaveRequests/{requestId}",
     region: "asia-southeast1"
 }, async (event) => {
-    // Initialize transporter using new environment variables
     const transporter = nodemailer.createTransport({
         host: "mail.aibs.edu.lk",
         port: 465,
-        secure: true, // Use true for port 465
+        secure: true,
         auth: {
-            user: process.env.EMAIL_USER, // Correct v2 method
-            pass: process.env.EMAIL_PASS  // Correct v2 method
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS
         }
     });
 
@@ -136,25 +217,7 @@ exports.onLeaveRequestUpdate = onDocumentUpdated({
         from: '"HRMS Portal" <hrms@aibs.edu.lk>',
         to: employeeData.email,
         subject: `Update on your leave request: ${afterData.status}`,
-        html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h2 style="color: #1e293b; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Leave Request Update</h2>
-                <p>Hello <strong>${employeeData.name}</strong>,</p>
-                <p>Your leave request for <strong>${startDate} - ${endDate}</strong> has been updated. The new status is: <strong>${afterData.status}</strong>.</p>
-                ${afterData.status === 'Rejected' && afterData.rejectionReason ? `<p><strong>Reason for rejection:</strong> ${afterData.rejectionReason}</p>` : ''}
-                <div style="text-align: center; margin: 30px 0;">
-                    <a href="https://hrms.aibs.edu.lk/dashboard"
-                       style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
-                        View Your Dashboard
-                    </a>
-                </div>
-                <p>You can view the full details by logging into the HR Portal.</p>
-                <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
-                <p style="color: #64748b; font-size: 12px; text-align: center;">
-                    This is an automated message from the HRMS Portal. Please do not reply to this email.
-                </p>
-            </div>
-        `,
+        html: leaveUpdateTemplate(employeeData.name, startDate, endDate, afterData.status, afterData.rejectionReason)
     };
 
     try {
@@ -180,13 +243,10 @@ exports.resetAnnualLeaveBalances = onSchedule({
             const userData = doc.data();
             const userRef = db.collection('users').doc(doc.id);
             const resetBalances = {
-                annualLeave: 14, sickLeave: 7, casualLeave: 7, 'leave in-lieu': 0, shortLeave: 12, other: 0
+                annualLeave: 14, sickLeave: 7, casualLeave: 7, 'leave in-lieu': 0, shortLeave: 12, other: 0,
+                maternityLeave: 0,
+                paternityLeave: 0
             };
-            if (userData.gender === 'female') {
-                resetBalances.maternityLeave = 84;
-            } else if (userData.gender === 'male') {
-                resetBalances.paternityLeave = 3;
-            }
             batch.update(userRef, { leaveBalance: resetBalances });
             updateCount++;
         });
@@ -198,9 +258,8 @@ exports.resetAnnualLeaveBalances = onSchedule({
     }
 });
 
-// Function to send performance evaluation reminders
 exports.sendPerformanceEvaluationReminders = onSchedule({
-    schedule: "0 9 * * *", // Daily at 9 AM
+    schedule: "0 9 * * *",
     timeZone: "Asia/Colombo",
     region: "asia-southeast1"
 }, async (event) => {
@@ -216,18 +275,14 @@ exports.sendPerformanceEvaluationReminders = onSchedule({
         for (const doc of usersSnapshot.docs) {
             const userData = doc.data();
 
-            // Check if user has a next evaluation date
             if (userData.nextEvaluationDate) {
                 const nextEvaluationDate = new Date(userData.nextEvaluationDate);
 
-                // Check if evaluation is exactly 3 days from now
                 if (nextEvaluationDate.toDateString() === threeDaysFromNow.toDateString()) {
-                    // Send reminder email to user
                     await sendEvaluationReminder(userData, 'employee');
 
-                    // Send reminder email to HR managers
                     const hrManagersSnapshot = await db.collection('users')
-                        .where('role', '==', 'Manager HR')
+                        .where('role', 'in', ['Manager HR', 'Admin'])
                         .get();
 
                     for (const hrDoc of hrManagersSnapshot.docs) {
@@ -246,7 +301,6 @@ exports.sendPerformanceEvaluationReminders = onSchedule({
     }
 });
 
-// Function to update evaluation dates after evaluation
 exports.onPerformanceEvaluationComplete = onDocumentUpdated({
     document: "users/{userId}",
     region: "asia-southeast1"
@@ -260,11 +314,8 @@ exports.onPerformanceEvaluationComplete = onDocumentUpdated({
     const beforeData = change.before.data();
     const afterData = change.after.data();
 
-    // Check if employee status was changed (indicating evaluation completion)
     if (beforeData.employeeStatus !== afterData.employeeStatus) {
         const userRef = db.collection('users').doc(afterData.uid || event.params.userId);
-
-        // Calculate next evaluation date (3 months from now)
         const nextEvaluationDate = new Date();
         nextEvaluationDate.setMonth(nextEvaluationDate.getMonth() + 3);
 
@@ -303,11 +354,17 @@ async function sendEvaluationReminder(userData, recipientType, hrData = null) {
             to: recipientEmail,
             subject: subject,
             html: `
-                <p>Hello ${recipientName},</p>
-                <p>This is a reminder that your performance evaluation is scheduled for <strong>${new Date(userData.nextEvaluationDate).toLocaleDateString()}</strong> (3 days from now).</p>
-                <p>Please prepare any relevant documentation or feedback you would like to discuss during your evaluation.</p>
-                <p>If you have any questions, please contact your HR manager.</p>
-                <p>Best regards,<br/>HRMS Team</p>
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <h2 style="color: #1e293b; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Performance Evaluation Reminder</h2>
+                    <p>Hello <strong>${recipientName}</strong>,</p>
+                    <p>This is a reminder that your performance evaluation is scheduled for <strong>${new Date(userData.nextEvaluationDate).toLocaleDateString()}</strong> (3 days from now).</p>
+                    <p>Please prepare any relevant documentation or feedback you would like to discuss during your evaluation.</p>
+                    <p>If you have any questions, please contact your HR manager.</p>
+                    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+                    <p style="color: #64748b; font-size: 12px; text-align: center;">
+                        This is an automated message from the HRMS Portal. Please do not reply to this email.
+                    </p>
+                </div>
             `
         };
     } else if (recipientType === 'hr' && hrData) {
@@ -319,16 +376,28 @@ async function sendEvaluationReminder(userData, recipientType, hrData = null) {
             to: recipientEmail,
             subject: subject,
             html: `
-                <p>Hello ${recipientName},</p>
-                <p>This is a reminder that <strong>${userData.name}</strong>'s performance evaluation is scheduled for <strong>${new Date(userData.nextEvaluationDate).toLocaleDateString()}</strong> (3 days from now).</p>
-                <p><strong>Employee Details:</strong></p>
-                <ul>
-                    <li>Department: ${userData.department}</li>
-                    <li>Current Status: ${userData.employeeStatus}</li>
-                    <li>Joined Date: ${userData.joinedDate ? new Date(userData.joinedDate).toLocaleDateString() : 'Not set'}</li>
-                </ul>
-                <p>Please ensure the evaluation is conducted on time and update the employee's status if necessary.</p>
-                <p>Best regards,<br/>HRMS Team</p>
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <h2 style="color: #1e293b; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Performance Evaluation Reminder</h2>
+                    <p>Hello <strong>${recipientName}</strong>,</p>
+                    <p>This is a reminder that <strong>${userData.name}</strong>'s performance evaluation is scheduled for <strong>${new Date(userData.nextEvaluationDate).toLocaleDateString()}</strong> (3 days from now).</p>
+                    <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3b82f6;">
+                        <p style="margin: 5px 0;"><strong>Employee:</strong> <span style="color: #1e293b; font-weight: bold;">${userData.name}</span></p>
+                        <p style="margin: 5px 0;"><strong>Department:</strong> <span style="color: #1e293b; font-weight: bold;">${userData.department || 'N/A'}</span></p>
+                        <p style="margin: 5px 0;"><strong>Current Status:</strong> <span style="color: #1e293b; font-weight: bold;">${userData.employeeStatus || 'Not set'}</span></p>
+                        <p style="margin: 5px 0;"><strong>Joined Date:</strong> <span style="color: #1e293b; font-weight: bold;">${userData.joinedDate ? new Date(userData.joinedDate).toLocaleDateString() : 'Not set'}</span></p>
+                    </div>
+                    <p>Please ensure the evaluation is conducted on time and update the employee's status if necessary.</p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="https://hrms.aibs.edu.lk/admin-dashboard"
+                           style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+                            Go to Admin Dashboard
+                        </a>
+                    </div>
+                    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+                    <p style="color: #64748b; font-size: 12px; text-align: center;">
+                        This is an automated message from the HRMS Portal. Please do not reply to this email.
+                    </p>
+                </div>
             `
         };
     }

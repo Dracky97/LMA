@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { getFirestore, collection, onSnapshot, doc, updateDoc, writeBatch } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, doc, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
 import { app } from '../../lib/firebase-client';
 import { useAuth } from '../../context/AuthContext';
+import LeaveHistoryTable from '../LeaveHistoryTable';
+import { LEAVE_TYPE_MAP } from '../../lib/leaveTypes';
 
 const db = getFirestore(app);
 
@@ -49,6 +51,20 @@ export default function AdminDashboard() {
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
     const { signup, userData: currentUserData } = useAuth();
 
+    // Company-wide leave requests (for Admin cancellation feature)
+    const [allRequests, setAllRequests] = useState([]);
+
+    // Map users by id for fast lookup in tables
+    const usersMap = React.useMemo(() => {
+        const map = {};
+        users.forEach(u => {
+            const key = u.uid || u.id;
+            if (key) map[key] = u;
+            if (u.id) map[u.id] = u;
+        });
+        return map;
+    }, [users]);
+
     const roleOptions = [
         'Employee',
         'Admin',
@@ -94,6 +110,22 @@ export default function AdminDashboard() {
         }, (error) => {
             console.error("Error fetching users:", error);
             setLoading(false);
+        });
+        return () => unsubscribe();
+    }, []);
+
+    // Subscribe to all leave requests for admin visibility and actions
+    useEffect(() => {
+        const unsubscribe = onSnapshot(collection(db, "leaveRequests"), (snapshot) => {
+            const requests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            requests.sort((a, b) => {
+                // Handle case where appliedOn might be undefined
+                if (!a.appliedOn || !b.appliedOn) return 0;
+                return b.appliedOn.toDate() - a.appliedOn.toDate();
+            });
+            setAllRequests(requests);
+        }, (error) => {
+            console.error("Error fetching leave requests:", error);
         });
         return () => unsubscribe();
     }, []);
@@ -235,6 +267,99 @@ export default function AdminDashboard() {
         } catch (error) {
             console.error('Error deleting user:', error);
             setError('Failed to delete user: ' + error.message);
+        }
+    };
+
+    // Restore previously adjusted leave balance for a cancelled request
+    const restoreLeaveBalance = async (request) => {
+        try {
+            const userRef = doc(db, "users", request.userId);
+            const userDoc = await getDoc(userRef);
+
+            if (!userDoc.exists()) {
+                throw new Error('User not found');
+            }
+
+            const currentData = userDoc.data();
+            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(' ', '');
+
+            if (!currentData.leaveBalance) {
+                currentData.leaveBalance = {};
+            }
+
+            if (!currentData.leaveBalance.hasOwnProperty(leaveType)) {
+                currentData.leaveBalance[leaveType] = 0;
+            }
+
+            const currentBalance = currentData.leaveBalance[leaveType];
+
+            // Use leaveUnits if available, otherwise calculate from dates
+            const duration = request.leaveUnits !== undefined && request.leaveUnits > 0
+                ? request.leaveUnits
+                : Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
+
+            // For accruing types, approval ADDED balance, so cancellation should SUBTRACT it back.
+            // For normal types, approval SUBTRACTED balance, so cancellation should ADD it back.
+            const isAccruingType = (leaveType === 'leave in-lieu' || leaveType === 'other');
+            const newBalance = isAccruingType ? currentBalance - duration : currentBalance + duration;
+
+            const updatedLeaveBalance = { ...currentData.leaveBalance, [leaveType]: newBalance };
+            const hasNegativeBalance = Object.values(updatedLeaveBalance).some(balance => balance < 0);
+            const currentlyOnNoPay = currentData.noPayStatus || false;
+
+            if (hasNegativeBalance && !currentlyOnNoPay) {
+                await updateDoc(userRef, {
+                    [`leaveBalance.${leaveType}`]: newBalance,
+                    noPayStatus: true,
+                    noPayStartDate: new Date().toISOString()
+                });
+            } else if (!hasNegativeBalance && currentlyOnNoPay) {
+                await updateDoc(userRef, {
+                    [`leaveBalance.${leaveType}`]: newBalance,
+                    noPayStatus: false,
+                    noPayEndDate: new Date().toISOString()
+                });
+            } else {
+                await updateDoc(userRef, {
+                    [`leaveBalance.${leaveType}`]: newBalance
+                });
+            }
+        } catch (error) {
+            console.error("Error restoring leave balance:", error);
+            throw error;
+        }
+    };
+
+    // Admin handler to cancel approved leave and restore balance
+    const handleCancelLeave = async (request) => {
+        try {
+            if (!request || request.status !== 'Approved') {
+                throw new Error('Only approved requests can be cancelled.');
+            }
+
+            const employeeName = usersMap[request.userId]?.name || 'employee';
+            const units = request.leaveUnits || Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
+            const confirmMsg = `Cancel ${request.type} for ${employeeName} (${units} day(s))? This will restore the leave balance.`;
+            if (typeof window !== 'undefined' && !window.confirm(confirmMsg)) {
+                return;
+            }
+
+            const requestRef = doc(db, "leaveRequests", request.id);
+
+            // Update request status to Cancelled
+            await updateDoc(requestRef, {
+                status: 'Cancelled',
+                cancelledBy: currentUserData?.name || 'Admin',
+                cancellationDate: new Date().toISOString()
+            });
+
+            // Restore balance accordingly
+            await restoreLeaveBalance(request);
+
+            setSuccess('Leave cancelled and balance restored successfully.');
+        } catch (error) {
+            console.error('Error cancelling leave:', error);
+            setError(`Error cancelling leave: ${error.message}`);
         }
     };
 
@@ -531,6 +656,22 @@ export default function AdminDashboard() {
                     </div>
                 )}
             </div>
+
+            {/* Company-wide Leave History */}
+            <div className="bg-card p-6 rounded-lg shadow-sm">
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xl font-semibold text-slate-200">Company-wide Leave History</h2>
+                    <div className="text-sm text-slate-400">Total: {allRequests.length}</div>
+                </div>
+                <LeaveHistoryTable
+                    requests={allRequests}
+                    users={usersMap}
+                    isAdminView={true}
+                    canCancel={true}
+                    onCancel={handleCancelLeave}
+                />
+            </div>
+
             {/* User Management Section */}
             <div className="bg-card p-6 rounded-lg shadow-sm">
                 <div className="flex justify-between items-center mb-4">

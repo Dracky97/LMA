@@ -231,6 +231,104 @@ export default function HRManagerDashboard() {
         }
     };
 
+    // Restore previously deducted/added leave for a cancelled request
+    const restoreLeaveBalance = async (request) => {
+        try {
+            const userRef = doc(db, "users", request.userId);
+            const userDoc = await getDoc(userRef);
+
+            if (!userDoc.exists()) {
+                throw new Error('User not found');
+            }
+
+            const currentData = userDoc.data();
+            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(' ', '');
+
+            if (!currentData.leaveBalance) {
+                currentData.leaveBalance = {};
+            }
+
+            if (!currentData.leaveBalance.hasOwnProperty(leaveType)) {
+                currentData.leaveBalance[leaveType] = 0;
+            }
+
+            const currentBalance = currentData.leaveBalance[leaveType];
+
+            const duration = request.leaveUnits !== undefined && request.leaveUnits > 0
+                ? request.leaveUnits
+                : Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
+
+            // For accruing types, approval ADDED balance, so cancellation should SUBTRACT it back.
+            // For normal types, approval SUBTRACTED balance, so cancellation should ADD it back.
+            const isAccruingType = (leaveType === 'leave in-lieu' || leaveType === 'other');
+            const newBalance = isAccruingType ? currentBalance - duration : currentBalance + duration;
+
+            console.log('Restoring leave due to cancellation:', {
+                leaveType,
+                duration,
+                currentBalance,
+                newBalance,
+                isAccruingType
+            });
+
+            const updatedLeaveBalance = { ...currentData.leaveBalance, [leaveType]: newBalance };
+            const hasNegativeBalance = Object.values(updatedLeaveBalance).some(balance => balance < 0);
+            const currentlyOnNoPay = currentData.noPayStatus || false;
+
+            if (hasNegativeBalance && !currentlyOnNoPay) {
+                await updateDoc(userRef, {
+                    [`leaveBalance.${leaveType}`]: newBalance,
+                    noPayStatus: true,
+                    noPayStartDate: new Date().toISOString()
+                });
+            } else if (!hasNegativeBalance && currentlyOnNoPay) {
+                await updateDoc(userRef, {
+                    [`leaveBalance.${leaveType}`]: newBalance,
+                    noPayStatus: false,
+                    noPayEndDate: new Date().toISOString()
+                });
+            } else {
+                await updateDoc(userRef, {
+                    [`leaveBalance.${leaveType}`]: newBalance
+                });
+            }
+        } catch (error) {
+            console.error("Error restoring leave balance:", error);
+            throw error;
+        }
+    };
+
+    // Handle cancellation by HR/Admin from history view
+    const handleCancelLeave = async (request) => {
+        try {
+            if (!request || request.status !== 'Approved') {
+                throw new Error('Only approved requests can be cancelled.');
+            }
+
+            const confirmMsg = `Cancel ${request.type} for ${users[request.userId]?.name || 'employee'} (${request.leaveUnits || Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24))} day(s))? This will restore the leave balance.`;
+            if (typeof window !== 'undefined' && !window.confirm(confirmMsg)) {
+                return;
+            }
+
+            const requestRef = doc(db, "leaveRequests", request.id);
+
+            // Update request status to Cancelled
+            await updateDoc(requestRef, {
+                status: 'Cancelled',
+                cancelledBy: userData?.name || 'HR/Admin',
+                cancellationDate: new Date().toISOString()
+            });
+
+            // Restore balance accordingly
+            await restoreLeaveBalance(request);
+
+            setMessage({ type: 'success', text: 'Leave cancelled and balance restored successfully.' });
+        } catch (error) {
+            console.error('Error cancelling leave:', error);
+            setMessage({ type: 'error', text: `Error cancelling leave: ${error.message}` });
+        }
+    };
+
     const pendingHRRequests = allRequests.filter(r => r.status === 'Pending HR Approval');
     const pendingFinalHRRequests = allRequests.filter(r => r.status === 'Pending HR Approval' && r.hrManagerApproval !== 'Approved');
 
@@ -777,7 +875,13 @@ export default function HRManagerDashboard() {
                 
                 {activeTab === 'history' && (
                     <div className="p-6">
-                        <LeaveHistoryTable requests={allRequests} users={users} isAdminView={true} />
+                        <LeaveHistoryTable
+                            requests={allRequests}
+                            users={users}
+                            isAdminView={true}
+                            canCancel={true}
+                            onCancel={handleCancelLeave}
+                        />
                     </div>
                 )}
 

@@ -6,12 +6,13 @@ const getStatusBadge = (status) => {
         'Rejected': 'bg-red-900/30 text-red-300',
         'Pending HR Approval': 'bg-blue-900/30 text-blue-300',
         'Pending Department Approval': 'bg-yellow-900/30 text-yellow-300',
+        'Cancelled': 'bg-slate-700 text-slate-300'
     };
     const color = statuses[status] || 'bg-slate-700 text-slate-300';
     return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${color}`}>{status}</span>;
 };
 
-export default function LeaveHistoryTable({ requests, users = {}, isAdminView = false }) {
+export default function LeaveHistoryTable({ requests, users = {}, isAdminView = false, canCancel = false, onCancel = () => {} }) {
     if (!requests || requests.length === 0) {
         return <p className="text-center text-slate-500 py-8">No leave requests found.</p>;
     }
@@ -32,6 +33,7 @@ export default function LeaveHistoryTable({ requests, users = {}, isAdminView = 
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Reason</th>
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Status</th>
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Rejection Reason</th>
+                        {canCancel && <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Actions</th>}
                     </tr>
                 </thead>
                 <tbody className="bg-card divide-y divide-gray-700">
@@ -40,7 +42,7 @@ export default function LeaveHistoryTable({ requests, users = {}, isAdminView = 
                             {isAdminView && <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-200">{users[req.userId]?.name || req.userName || 'Unknown User'}</td>}
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{req.type}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatDate(req.startDate)} - {formatDate(req.endDate)}</td>
-                            <td className="px-6 py-4 text-sm text-slate-400 max-w-xs truncate">{req.reason}</td>
+                            <td className="px-6 py-4 text-sm text-slate-400 max-w-xs truncate" title={req.reason}>{req.reason}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{getStatusBadge(req.status)}</td>
                             <td className="px-6 py-4 text-sm text-slate-400 max-w-xs truncate">
                                 {req.status === 'Rejected' && req.rejectionReason ? (
@@ -51,6 +53,21 @@ export default function LeaveHistoryTable({ requests, users = {}, isAdminView = 
                                     <span className="text-slate-500">-</span>
                                 )}
                             </td>
+                            {canCancel && (
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+                                    {req.status === 'Approved' ? (
+                                        <button
+                                            onClick={() => onCancel(req)}
+                                            className="text-red-400 hover:text-red-300 transition-colors"
+                                            title="Cancel approved leave"
+                                        >
+                                            Cancel
+                                        </button>
+                                    ) : (
+                                        <span className="text-slate-500">-</span>
+                                    )}
+                                </td>
+                            )}
                         </tr>
                     ))}
                 </tbody>

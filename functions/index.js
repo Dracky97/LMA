@@ -57,7 +57,7 @@ const leaveUpdateTemplate = (employeeName, startDate, endDate, status, rejection
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #1e293b; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Leave Request Update</h2>
         <p>Hello <strong>${employeeName}</strong>,</p>
-        <p>Your leave request for <strong>${startDate} - ${endDate}</strong> has been updated. The new status is: <strong>${status}</strong>.</p>
+        <p>Your leave request for <strong>${startDate} - ${endDate}</strong> has been updated. <br>The new status is: <strong>${status}</strong>.</p>
         ${rejectionReason ? `<p><strong>Reason for rejection:</strong> ${rejectionReason}</p>` : ''}
         <div style="text-align: center; margin: 30px 0;">
             <a href="https://hrms.aibs.edu.lk/dashboard"

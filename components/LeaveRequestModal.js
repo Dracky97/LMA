@@ -63,17 +63,19 @@ export default function LeaveRequestModal({ userData, onClose }) {
                     totalUnits += 1;
                 } else if (dayType === 'half') {
                     totalUnits += 0.5;
+                } else if (dayType === 'na') {
+                    // Not Applicable: no deduction
+                    totalUnits += 0;
                 } else if (dayType === 'short' && dayStartTime && dayEndTime) {
-                    const [startHour, startMin] = dayStartTime.split(':').map(Number);
-                    const [endHour, endMin] = dayEndTime.split(':').map(Number);
-                    const startMinutes = startHour * 60 + startMin;
-                    const endMinutes = endHour * 60 + endMin;
-                    const hours = (endMinutes - startMinutes) / 60;
+                    // Short Leave is strictly one of the two windows: 08:30-10:00 or 15:30-17:00
+                    const validWindow =
+                        (dayStartTime === '08:30' && dayEndTime === '10:00') ||
+                        (dayStartTime === '15:30' && dayEndTime === '17:00');
 
-                    if (hours < 1.5) {
-                        totalUnits += 0; // Short leave, no deduction
+                    if (validWindow) {
+                        totalUnits += 1; // consume one short leave unit
                     } else {
-                        totalUnits += 0.5; // Half day
+                        totalUnits += 0; // invalid window → no deduction
                     }
                 }
             } else {
@@ -132,33 +134,42 @@ export default function LeaveRequestModal({ userData, onClose }) {
                 const hours = Math.round((diffMinutes / 60) * 100) / 100; // Round to 2 decimal places
                 setTotalHours(hours);
 
-                // Updated leave calculation logic based on new requirements
                 let units = 0;
 
-                // Check if time range includes 12:30 PM (half day marker)
-                const startTimeStr = startTime; // e.g., "10:00"
-                const endTimeStr = endTime;     // e.g., "12:30"
+                if (type === 'Short Leave') {
+                    // Short Leave windows: 08:30-10:00 or 15:30-17:00 (1.5 hours)
+                    const validWindow =
+                        (startTime === '08:30' && endTime === '10:00') ||
+                        (startTime === '15:30' && endTime === '17:00');
 
-                // Check if either start or end time is 12:30 PM (half day boundary)
-                const isHalfDayStart = startTimeStr === "12:30";
-                const isHalfDayEnd = endTimeStr === "12:30";
+                    if (validWindow || Math.abs(hours - 1.5) < 0.01) {
+                        units = 1; // consume one short leave unit
+                    } else if (hours < 1.5) {
+                        units = 0; // no deduction
+                    } else {
+                        // Any longer range under Short Leave still consumes one unit
+                        units = 1;
+                    }
+                } else {
+                    // Check if time range includes 12:30 PM (half day marker)
+                    const startTimeStr = startTime;
+                    const endTimeStr = endTime;
+                    const isHalfDayStart = startTimeStr === "12:30";
+                    const isHalfDayEnd = endTimeStr === "12:30";
 
-                if (isHalfDayStart || isHalfDayEnd) {
-                    // If start or end is 12:30 PM, it's a half day
-                    units = 0.5;
-                } else if (hours < 1.5) {
-                    // Less than 1.5 hours = short leave (no deduction)
-                    units = 0;
-                } else if (hours >= 1.5 && hours < 4) {
-                    // 1.5 to 4 hours = half day
-                    units = 0.5;
-                } else if (hours >= 4) {
-                    // 4+ hours = full day
-                    units = 1;
+                    if (isHalfDayStart || isHalfDayEnd) {
+                        units = 0.5;
+                    } else if (hours < 1.5) {
+                        units = 0;
+                    } else if (hours >= 1.5 && hours < 4) {
+                        units = 0.5;
+                    } else if (hours >= 4) {
+                        units = 1;
+                    }
                 }
 
-                // For multi-day requests, multiply by number of days if time selection is provided
-                if (totalDays > 1 && startTime && endTime) {
+                // Do not multiply Short Leave by totalDays; Short Leave is per window
+                if (totalDays > 1 && startTime && endTime && type !== 'Short Leave') {
                     units = units * totalDays;
                 }
 
@@ -171,7 +182,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
             setTotalHours(0);
             setLeaveUnits(0);
         }
-    }, [startTime, endTime]);
+    }, [startTime, endTime, type, totalDays]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -233,6 +244,32 @@ export default function LeaveRequestModal({ userData, onClose }) {
                     finalLeaveUnits = leaveUnits;
                 } else {
                     finalLeaveUnits = totalDays;
+                }
+            }
+
+            // Short Leave rule: strictly fixed 1.5h windows reduce 1 shortLeave unit
+            if (type === 'Short Leave') {
+                if (useGranularSelection) {
+                    // In granular mode, calculateGranularLeaveUnits() already counted 1 per valid short window
+                    // Do not ceil; it returns an integer count of valid short days
+                } else {
+                    if (totalDays !== 1) {
+                        setError('Short Leave must be for a single day.');
+                        return;
+                    }
+                    if (!startTime || !endTime) {
+                        setError('Please select the Short Leave time range.');
+                        return;
+                    }
+                    const validWindow =
+                        (startTime === '08:30' && endTime === '10:00') ||
+                        (startTime === '15:30' && endTime === '17:00');
+
+                    if (!validWindow) {
+                        setError('Short Leave must be exactly 08:30–10:00 or 15:30–17:00.');
+                        return;
+                    }
+                    finalLeaveUnits = 1; // consume one short leave
                 }
             }
 
@@ -387,6 +424,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                                         <option value="full">Full Day</option>
                                                         <option value="half">Half Day</option>
                                                         <option value="short">Short Leave</option>
+                                                        <option value="na">Not Applicable</option>
                                                     </select>
                                                 </div>
 

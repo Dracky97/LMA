@@ -228,36 +228,6 @@ exports.onLeaveRequestUpdate = onDocumentUpdated({
     }
 });
 
-exports.resetAnnualLeaveBalances = onSchedule({
-    schedule: "0 0 31 12 *",
-    timeZone: "Asia/Colombo",
-    region: "asia-southeast1"
-}, async (event) => {
-    console.log('Starting annual leave balance reset...');
-    try {
-        const usersSnapshot = await db.collection('users').get();
-        const batch = db.batch();
-        let updateCount = 0;
-
-        usersSnapshot.forEach(doc => {
-            const userData = doc.data();
-            const userRef = db.collection('users').doc(doc.id);
-            const resetBalances = {
-                annualLeave: 14, sickLeave: 7, casualLeave: 7, 'leave in-lieu': 0, shortLeave: 12, other: 0,
-                maternityLeave: 0,
-                paternityLeave: 0
-            };
-            batch.update(userRef, { leaveBalance: resetBalances });
-            updateCount++;
-        });
-
-        await batch.commit();
-        console.log(`Successfully reset leave balances for ${updateCount} users`);
-    } catch (error) {
-        console.error('Error resetting annual leave balances:', error);
-    }
-});
-
 exports.sendPerformanceEvaluationReminders = onSchedule({
     schedule: "0 9 * * *",
     timeZone: "Asia/Colombo",
@@ -328,92 +298,9 @@ exports.onPerformanceEvaluationComplete = onDocumentUpdated({
     }
 });
 
-// Helper function to send evaluation reminder emails
-async function sendEvaluationReminder(userData, recipientType, hrData = null) {
-    const transporter = nodemailer.createTransporter({
-        host: "mail.aibs.edu.lk",
-        port: 465,
-        secure: true,
-        auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS
-        }
-    });
-
-    let mailOptions;
-    let subject;
-    let recipientEmail;
-    let recipientName;
-
-    if (recipientType === 'employee') {
-        subject = 'Performance Evaluation Reminder - 3 Days';
-        recipientEmail = userData.email;
-        recipientName = userData.name;
-        mailOptions = {
-            from: '"HRMS Portal" <hrms@aibs.edu.lk>',
-            to: recipientEmail,
-            subject: subject,
-            html: `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                    <h2 style="color: #1e293b; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Performance Evaluation Reminder</h2>
-                    <p>Hello <strong>${recipientName}</strong>,</p>
-                    <p>This is a reminder that your performance evaluation is scheduled for <strong>${new Date(userData.nextEvaluationDate).toLocaleDateString()}</strong> (3 days from now).</p>
-                    <p>Please prepare any relevant documentation or feedback you would like to discuss during your evaluation.</p>
-                    <p>If you have any questions, please contact your HR manager.</p>
-                    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
-                    <p style="color: #64748b; font-size: 12px; text-align: center;">
-                        This is an automated message from the HRMS Portal. Please do not reply to this email.
-                    </p>
-                </div>
-            `
-        };
-    } else if (recipientType === 'hr' && hrData) {
-        subject = `Performance Evaluation Reminder - ${userData.name}`;
-        recipientEmail = hrData.email;
-        recipientName = hrData.name;
-        mailOptions = {
-            from: '"HRMS Portal" <hrms@aibs.edu.lk>',
-            to: recipientEmail,
-            subject: subject,
-            html: `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                    <h2 style="color: #1e293b; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Performance Evaluation Reminder</h2>
-                    <p>Hello <strong>${recipientName}</strong>,</p>
-                    <p>This is a reminder that <strong>${userData.name}</strong>'s performance evaluation is scheduled for <strong>${new Date(userData.nextEvaluationDate).toLocaleDateString()}</strong> (3 days from now).</p>
-                    <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3b82f6;">
-                        <p style="margin: 5px 0;"><strong>Employee:</strong> <span style="color: #1e293b; font-weight: bold;">${userData.name}</span></p>
-                        <p style="margin: 5px 0;"><strong>Department:</strong> <span style="color: #1e293b; font-weight: bold;">${userData.department || 'N/A'}</span></p>
-                        <p style="margin: 5px 0;"><strong>Current Status:</strong> <span style="color: #1e293b; font-weight: bold;">${userData.employeeStatus || 'Not set'}</span></p>
-                        <p style="margin: 5px 0;"><strong>Joined Date:</strong> <span style="color: #1e293b; font-weight: bold;">${userData.joinedDate ? new Date(userData.joinedDate).toLocaleDateString() : 'Not set'}</span></p>
-                    </div>
-                    <p>Please ensure the evaluation is conducted on time and update the employee's status if necessary.</p>
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="https://hrms.aibs.edu.lk/admin-dashboard"
-                           style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
-                            Go to Admin Dashboard
-                        </a>
-                    </div>
-                    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
-                    <p style="color: #64748b; font-size: 12px; text-align: center;">
-                        This is an automated message from the HRMS Portal. Please do not reply to this email.
-                    </p>
-                </div>
-            `
-        };
-    }
-
-    try {
-        await transporter.sendMail(mailOptions);
-        console.log(`Evaluation reminder sent to ${recipientType}: ${recipientEmail}`);
-    } catch (error) {
-        console.error(`Error sending evaluation reminder to ${recipientType}:`, error);
-    }
-}
-
 /**
  * Monthly Short Leave Accrual
  * Give every user 1 short leave unit on the 1st of each month (Asia/Colombo).
- * This accrues (adds) and is intended to be deducted when user applies a 1.5h Short Leave window.
  */
 exports.accrueMonthlyShortLeave = onSchedule({
     schedule: "0 0 1 * *",
@@ -429,33 +316,13 @@ exports.accrueMonthlyShortLeave = onSchedule({
         let batch = db.batch();
         let counter = 0;
         let updated = 0;
-        let skipped = 0;
-
-        // Compute current accrual marker (YYYY-MM) to make the job idempotent
-        const now = new Date();
-        const currentMonthMarker = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
         for (const docSnap of docs) {
-            const userData = docSnap.data();
             const userRef = db.collection('users').doc(docSnap.id);
 
-            // Skip if already accrued this month (idempotency)
-            if (userData.lastShortLeaveAccrualMonth === currentMonthMarker) {
-                skipped++;
-                continue;
-            }
-
-            const currentShortLeave =
-                (userData.leaveBalance && typeof userData.leaveBalance.shortLeave === 'number')
-                    ? userData.leaveBalance.shortLeave
-                    : 0;
-
-            const newShortLeave = currentShortLeave + 1;
-
+            // Set the shortLeave balance to 1 on the first of the month
             batch.update(userRef, {
-                'leaveBalance.shortLeave': newShortLeave,
-                lastShortLeaveAccrual: now.toISOString(),
-                lastShortLeaveAccrualMonth: currentMonthMarker
+                'leaveBalance.shortLeave': 1,
             });
 
             counter++;
@@ -472,7 +339,7 @@ exports.accrueMonthlyShortLeave = onSchedule({
             await batch.commit();
         }
 
-        console.log(`Monthly short leave accrual done. Updated ${updated} users. Skipped ${skipped} users already accrued for ${currentMonthMarker}.`);
+        console.log(`Monthly short leave accrual done. Updated ${updated} users.`);
     } catch (error) {
         console.error("Error during monthly short leave accrual:", error);
     }

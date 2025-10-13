@@ -623,15 +623,13 @@ export default function HRManagerDashboard() {
             maternityLeave: user.leaveBalance?.maternityLeave || 0,
             paternityLeave: user.leaveBalance?.paternityLeave || 0,
             'leave in-lieu': user.leaveBalance?.['leave in-lieu'] || 0,
-            shortLeave: user.leaveBalance?.shortLeave || 0,
             other: user.leaveBalance?.other || 0,
             // Total leave allocations (custom totals per user) - no defaults
             annualLeaveTotal: user.leaveAllocations?.annualLeave ?? 0,
             sickLeaveTotal: user.leaveAllocations?.sickLeave ?? 0,
             casualLeaveTotal: user.leaveAllocations?.casualLeave ?? 0,
             maternityLeaveTotal: user.leaveAllocations?.maternityLeave ?? 0,
-            paternityLeaveTotal: user.leaveAllocations?.paternityLeave ?? 0,
-            shortLeaveTotal: user.leaveAllocations?.shortLeave ?? 0
+            paternityLeaveTotal: user.leaveAllocations?.paternityLeave ?? 0
         });
         setShowEditBalanceModal(true);
     };
@@ -671,7 +669,6 @@ export default function HRManagerDashboard() {
                 maternityLeave: editBalanceData.maternityLeave || 0,
                 paternityLeave: editBalanceData.paternityLeave || 0,
                 'leave in-lieu': editBalanceData['leave in-lieu'] || 0,
-                shortLeave: editBalanceData.shortLeave || 0,
                 other: editBalanceData.other || 0
             };
 
@@ -682,8 +679,7 @@ export default function HRManagerDashboard() {
                 sickLeave: editBalanceData.sickLeaveTotal || 0,
                 casualLeave: editBalanceData.casualLeaveTotal || 0,
                 maternityLeave: editBalanceData.maternityLeaveTotal || 0,
-                paternityLeave: editBalanceData.paternityLeaveTotal || 0,
-                shortLeave: editBalanceData.shortLeaveTotal || 0
+                paternityLeave: editBalanceData.paternityLeaveTotal || 0
             };
 
             console.log('Final data to update:', { leaveBalance, leaveAllocations });
@@ -822,7 +818,6 @@ export default function HRManagerDashboard() {
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Maternity Leave</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Paternity Leave</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Leave in-lieu</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Short Leave</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Other</th>
                                     </tr>
                                 </thead>
@@ -858,7 +853,6 @@ export default function HRManagerDashboard() {
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.maternityLeave)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.paternityLeave)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.['leave in-lieu'])}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.shortLeave)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.other)}</td>
                                         </tr>
                                     ))}
@@ -1159,16 +1153,6 @@ export default function HRManagerDashboard() {
                                             />
                                         </div>
 
-                                        <div>
-                                            <label className="block text-sm font-medium text-slate-300 mb-1">Short Leave</label>
-                                            <input
-                                                type="number"
-                                                step="0.5"
-                                                value={editBalanceData.shortLeave}
-                                                onChange={(e) => handleBalanceChange('shortLeave', e.target.value)}
-                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                            />
-                                        </div>
 
                                         <div>
                                             <label className="block text-sm font-medium text-slate-300 mb-1">Other Leave</label>
@@ -1243,16 +1227,6 @@ export default function HRManagerDashboard() {
                                         </div>
 
 
-                                        <div>
-                                            <label className="block text-sm font-medium text-slate-300 mb-1">Short Leave Total</label>
-                                            <input
-                                                type="number"
-                                                step="0.5"
-                                                value={editBalanceData.shortLeaveTotal}
-                                                onChange={(e) => handleBalanceChange('shortLeaveTotal', e.target.value)}
-                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-green-500"
-                                            />
-                                        </div>
 
                                     </div>
                                 </div>

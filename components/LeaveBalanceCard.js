@@ -82,8 +82,8 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
     };
 
     // Desired display order:
-    // Annual, Casual, Sick, Short, Leave in-lieu, Other, Maternity/Paternity (gender-filtered)
-    const ORDER = ['annualLeave', 'casualLeave', 'sickLeave', 'shortLeave', 'leave in-lieu', 'other', 'maternityLeave', 'paternityLeave'];
+    // Annual, Casual, Sick, Leave in-lieu, Other, Maternity/Paternity (gender-filtered)
+    const ORDER = ['annualLeave', 'casualLeave', 'sickLeave', 'leave in-lieu', 'other', 'maternityLeave', 'paternityLeave'];
 
     // Filter out leave types that shouldn't be displayed, then sort to desired order
     const displayableLeaveTypes = filteredLeaveTypes

@@ -298,52 +298,6 @@ exports.onPerformanceEvaluationComplete = onDocumentUpdated({
     }
 });
 
-/**
- * Monthly Short Leave Accrual
- * Give every user 1 short leave unit on the 1st of each month (Asia/Colombo).
- */
-exports.accrueMonthlyShortLeave = onSchedule({
-    schedule: "0 0 1 * *",
-    timeZone: "Asia/Colombo",
-    region: "asia-southeast1"
-}, async () => {
-    console.log("Starting monthly short leave accrual...");
-    try {
-        const usersSnapshot = await db.collection('users').get();
-
-        const docs = usersSnapshot.docs;
-        const BATCH_LIMIT = 500;
-        let batch = db.batch();
-        let counter = 0;
-        let updated = 0;
-
-        for (const docSnap of docs) {
-            const userRef = db.collection('users').doc(docSnap.id);
-
-            // Set the shortLeave balance to 1 on the first of the month
-            batch.update(userRef, {
-                'leaveBalance.shortLeave': 1,
-            });
-
-            counter++;
-            updated++;
-
-            if (counter >= BATCH_LIMIT) {
-                await batch.commit();
-                batch = db.batch();
-                counter = 0;
-            }
-        }
-
-        if (counter > 0) {
-            await batch.commit();
-        }
-
-        console.log(`Monthly short leave accrual done. Updated ${updated} users.`);
-    } catch (error) {
-        console.error("Error during monthly short leave accrual:", error);
-    }
-});
 
 // API function to handle Next.js API routes
 exports.api = onRequest({

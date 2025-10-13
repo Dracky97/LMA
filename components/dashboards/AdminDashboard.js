@@ -388,7 +388,6 @@ export default function AdminDashboard() {
                 maternityLeave: user.leaveBalance?.maternityLeave ?? 0,
                 paternityLeave: user.leaveBalance?.paternityLeave ?? 0,
                 'leave in-lieu': user.leaveBalance?.['leave in-lieu'] ?? 0,
-                shortLeave: user.leaveBalance?.shortLeave ?? 0,
                 other: user.leaveBalance?.other ?? 0
             },
             leaveAllocations: {
@@ -398,7 +397,6 @@ export default function AdminDashboard() {
                 maternityLeave: user.leaveAllocations?.maternityLeave ?? 0,
                 paternityLeave: user.leaveAllocations?.paternityLeave ?? 0,
                 'leave in-lieu': user.leaveAllocations?.['leave in-lieu'] ?? 0,
-                shortLeave: user.leaveAllocations?.shortLeave ?? 0,
                 other: user.leaveAllocations?.other ?? 0
             }
         });

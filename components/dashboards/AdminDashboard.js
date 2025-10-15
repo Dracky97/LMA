@@ -449,11 +449,20 @@ export default function AdminDashboard() {
             const userDocRef = doc(db, 'users', userId);
             console.log('User document reference:', userDocRef.path);
 
-            // Prepare update data with only the fields we want to update
+            // Prepare update data with all editable fields
             const sanitizedAllocations = Object.fromEntries(
                 Object.entries(editUserData.leaveAllocations || {}).filter(([k]) => k !== 'leave in-lieu' && k !== 'other')
             );
             const updateData = {
+                name: editUserData.name,
+                email: editUserData.email,
+                role: editUserData.role,
+                department: editUserData.department,
+                designation: editUserData.designation,
+                employeeNumber: editUserData.employeeNumber,
+                gender: editUserData.gender,
+                managerId: editUserData.managerId || null,
+                personalDetails: editUserData.personalDetails,
                 leaveBalance: editUserData.leaveBalance || {},
                 leaveAllocations: sanitizedAllocations
             };
@@ -468,6 +477,7 @@ export default function AdminDashboard() {
                 const joinedDateObj = new Date(editUserData.joinedDate);
                 const nextEvaluationDate = new Date(joinedDateObj);
                 nextEvaluationDate.setMonth(nextEvaluationDate.getMonth() + 3);
+                updateData.joinedDate = joinedDateObj.toISOString();
                 updateData.nextEvaluationDate = nextEvaluationDate.toISOString();
             }
 

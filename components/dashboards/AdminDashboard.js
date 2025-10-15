@@ -28,7 +28,8 @@ export default function AdminDashboard() {
         designation: '',
         birthday: '',
         employeeStatus: 'probation',
-        joinedDate: ''
+        joinedDate: '',
+        role: 'Employee'
     });
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
@@ -73,6 +74,7 @@ export default function AdminDashboard() {
         'CFO',
         'COO',
         'Head of Academic',
+        'Academic - Senior Lecturer',
         'Head - Student Support',
         'Manager IT',
         'Finance Manager',
@@ -507,7 +509,7 @@ export default function AdminDashboard() {
         e.preventDefault();
         setError('');
         setSuccess('');
-        
+
         try {
             await signup(
                 newUser.name,
@@ -520,7 +522,8 @@ export default function AdminDashboard() {
                 newUser.designation || null,
                 newUser.birthday || null,
                 newUser.employeeStatus || 'probation',
-                newUser.joinedDate || null
+                newUser.joinedDate || null,
+                newUser.role || 'Employee'
             );
             setSuccess('User added successfully!');
             // Reset form
@@ -535,7 +538,8 @@ export default function AdminDashboard() {
                 designation: '',
                 birthday: '',
                 employeeStatus: 'probation',
-                joinedDate: ''
+                joinedDate: '',
+                role: 'Employee'
             });
             // Close the form after a short delay
             setTimeout(() => {
@@ -842,6 +846,22 @@ export default function AdminDashboard() {
                                     />
                                 </div>
                                 
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Role</label>
+                                    <select
+                                        name="role"
+                                        value={newUser.role}
+                                        onChange={handleAddUserChange}
+                                        required
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    >
+                                        <option value="">Select Role</option>
+                                        {roleOptions.map(role => (
+                                            <option key={role} value={role}>{role}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
                                 <div className="mb-4">
                                     <label className="block text-sm font-medium text-slate-300 mb-1">Department</label>
                                     <select

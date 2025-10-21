@@ -554,6 +554,7 @@ const selectedUser = users[employeeId];
                     if (hasNegativeBalance) {
                         noPayEmployees.push({
                             id: user.uid || user.id,
+                            employeeId: user.employeeNumber || user.id,
                             name: user.name,
                             department: user.department || 'N/A',
                             leaveBalance: user.leaveBalance,
@@ -671,29 +672,31 @@ const selectedUser = users[employeeId];
                 pdf.setFont('helvetica', 'normal');
 
                 // Table headers
-                pdf.text('Employee', 20, yPosition);
-                pdf.text('Department', 70, yPosition);
-                pdf.text('Leave Balances', 120, yPosition);
-                pdf.text('No Pay Start', 170, yPosition);
+                pdf.text('Employee ID', 20, yPosition);
+                pdf.text('Employee', 60, yPosition);
+                pdf.text('Department', 100, yPosition);
+                pdf.text('Leave Balances', 140, yPosition);
+                pdf.text('No Pay Start', 190, yPosition);
                 yPosition += 8;
 
                 // Table data
                 monthlyReport.noPayEmployees.forEach((employee) => {
                     checkAndAddPage(12);
-                    pdf.text(employee.name.substring(0, 15), 20, yPosition);
-                    pdf.text(employee.department.substring(0, 15), 70, yPosition);
+                    pdf.text(employee.employeeId.substring(0, 10), 20, yPosition);
+                    pdf.text(employee.name.substring(0, 15), 60, yPosition);
+                    pdf.text(employee.department.substring(0, 15), 100, yPosition);
 
-                    // Leave balances
+                    // Leave balances (only negative)
                     let balanceText = '';
-                    Object.entries(employee.leaveBalance).forEach(([type, balance]) => {
-                        balanceText += `${type}: ${balance < 0 ? balance : balance}, `;
+                    Object.entries(employee.leaveBalance).filter(([type, balance]) => balance < 0).forEach(([type, balance]) => {
+                        balanceText += `${type}: ${balance}, `;
                     });
                     balanceText = balanceText.slice(0, -2); // Remove last comma and space
-                    pdf.text(balanceText.substring(0, 25), 120, yPosition);
+                    pdf.text(balanceText.substring(0, 25), 140, yPosition);
 
                     // No pay start date
                     const noPayDate = employee.noPayStartDate ? new Date(employee.noPayStartDate).toLocaleDateString() : 'N/A';
-                    pdf.text(noPayDate, 170, yPosition);
+                    pdf.text(noPayDate, 190, yPosition);
                     yPosition += 8;
                 });
 
@@ -1268,6 +1271,7 @@ const selectedUser = users[employeeId];
                                                 <table className="min-w-full divide-y divide-gray-700">
                                                     <thead className="bg-muted">
                                                         <tr>
+                                                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Employee ID</th>
                                                             <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Employee</th>
                                                             <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Department</th>
                                                             <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Leave Balances</th>
@@ -1278,11 +1282,12 @@ const selectedUser = users[employeeId];
                                                     <tbody className="bg-card divide-y divide-gray-700">
                                                         {monthlyReport.noPayEmployees.map((employee) => (
                                                             <tr key={employee.id}>
+                                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-200">{employee.employeeId}</td>
                                                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-200">{employee.name}</td>
                                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{employee.department}</td>
                                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
                                                                     <div className="space-y-1">
-                                                                        {Object.entries(employee.leaveBalance).map(([type, balance]) => (
+                                                                        {Object.entries(employee.leaveBalance).filter(([type, balance]) => balance < 0).map(([type, balance]) => (
                                                                             <div key={type} className={`text-xs ${balance < 0 ? 'text-red-400 font-semibold' : 'text-slate-400'}`}>
                                                                                 {type}: {formatLeaveBalance(balance)}
                                                                             </div>

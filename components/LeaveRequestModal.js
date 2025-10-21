@@ -17,6 +17,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
     const [totalHours, setTotalHours] = useState(0);
     const [totalMinutes, setTotalMinutes] = useState(0);
     const [leaveUnits, setLeaveUnits] = useState(0);
+    const [substituteFor, setSubstituteFor] = useState('');
 
     // New state for granular date selection
     const [useGranularSelection, setUseGranularSelection] = useState(false);
@@ -190,18 +191,24 @@ export default function LeaveRequestModal({ userData, onClose }) {
             return;
         }
 
+        // Validate substitute for field for Leave in-lieu
+        if (type === 'Leave in-lieu' && !substituteFor.trim()) {
+            setError('Please specify the date you are substituting for.');
+            return;
+        }
+
         // Validate business hours (8am - 5pm)
         if (startTime || endTime) {
             const validateTime = (timeStr) => {
                 const [hour] = timeStr.split(':').map(Number);
                 return hour >= 8 && hour <= 17;
             };
-            
+
             if (startTime && !validateTime(startTime)) {
                 setError('Start time must be between 8:00 AM and 5:00 PM.');
                 return;
             }
-            
+
             if (endTime && !validateTime(endTime)) {
                 setError('End time must be between 8:00 AM and 5:00 PM.');
                 return;
@@ -239,6 +246,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
                 totalDays: totalDays,
                 leaveUnits: finalLeaveUnits,
                 isGranularSelection: useGranularSelection,
+                ...(type === 'Leave in-lieu' && { substituteFor: substituteFor.trim() }),
             };
 
             // Add granular configuration if used
@@ -521,6 +529,21 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                         Use "Detailed Planning" mode for day-by-day time configuration.
                                     </p>
                                 </div>
+                            </div>
+                        )}
+
+                        {/* Substitute For - Only for Leave in-lieu */}
+                        {type === 'Leave in-lieu' && (
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium text-slate-300 mb-1">Substitute For <span className="text-red-400">*</span></label>
+                                <input
+                                    type="text"
+                                    value={substituteFor}
+                                    onChange={(e) => setSubstituteFor(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
+                                    placeholder="Enter who you are substituting for"
+                                    required
+                                />
                             </div>
                         )}
 

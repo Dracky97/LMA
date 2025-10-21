@@ -173,7 +173,7 @@ export default function HRManagerDashboard() {
             }
 
             const currentData = userDoc.data();
-            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(' ', '');
+            const leaveType = LEAVE_TYPE_MAP[request.type] || (request.type ? request.type.toLowerCase().replace(' ', '') : 'annualleave');
 
             if (!currentData.leaveBalance) {
                 currentData.leaveBalance = {};
@@ -247,7 +247,7 @@ export default function HRManagerDashboard() {
             }
 
             const currentData = userDoc.data();
-            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(' ', '');
+            const leaveType = LEAVE_TYPE_MAP[request.type] || (request.type ? request.type.toLowerCase().replace(' ', '') : 'annualleave');
 
             if (!currentData.leaveBalance) {
                 currentData.leaveBalance = {};
@@ -347,11 +347,14 @@ export default function HRManagerDashboard() {
                 throw new Error('Please fill in all required fields with valid values.');
             }
 
+            // Ensure type has a default value
+            const leaveType = type || 'Annual Leave';
+
             if (new Date(endDate) < new Date(startDate)) {
                 throw new Error('End date must be after start date.');
             }
 
-            const selectedUser = users[employeeId];
+const selectedUser = users[employeeId];
             if (!selectedUser) {
                 throw new Error('Selected employee not found.');
             }
@@ -359,10 +362,10 @@ export default function HRManagerDashboard() {
             // Create the manual leave request
             const requestData = {
                 userId: employeeId,
-                userName: selectedUser.name,
-                managerId: selectedUser.managerId || userData.uid, // Use HR as manager if none assigned
-                department: selectedUser.department,
-                type,
+                userName: selectedUser.name || 'Unknown User', // Added fallback
+                managerId: selectedUser.managerId || userData.uid,
+                department: selectedUser.department || 'Unknown Department', // Added fallback
+                type: leaveType,
                 startDate: new Date(startDate),
                 endDate: new Date(endDate),
                 reason: reason || 'Manual leave entry by HR',
@@ -371,10 +374,10 @@ export default function HRManagerDashboard() {
                 leaveUnits,
                 totalDays: leaveUnits, // For simplicity, assume leaveUnits equals totalDays
                 hrManagerApproval: 'Approved',
-                hrManagerActionBy: userData.name,
+                hrManagerActionBy: userData.name || 'HR Manager',
                 hrApprovalDate: new Date().toISOString(),
                 isManualEntry: true,
-                manualEntryBy: userData.name,
+                manualEntryBy: userData.name || 'HR Manager',
                 manualEntryDate: new Date().toISOString()
             };
 

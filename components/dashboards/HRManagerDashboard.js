@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { useAuth } from '../../context/AuthContext';
-import { getFirestore, collection, onSnapshot, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, doc, updateDoc, getDoc, addDoc } from 'firebase/firestore';
 import { app } from '../../lib/firebase-client';
 import ManagerRequestsTable from '../ManagerRequestsTable';
 import LeaveHistoryTable from '../LeaveHistoryTable';
 import LeaveRequestModal from '../LeaveRequestModal';
 import MyLeaveSection from '../MyLeaveSection';
-import { LEAVE_TYPE_MAP, validateLeaveType } from '../../lib/leaveTypes';
+import { LEAVE_TYPE_MAP, validateLeaveType, LEAVE_TYPES } from '../../lib/leaveTypes';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -31,6 +31,11 @@ export default function HRManagerDashboard() {
     const [editingUser, setEditingUser] = useState(null);
     const [showEditBalanceModal, setShowEditBalanceModal] = useState(false);
     const [editBalanceData, setEditBalanceData] = useState({});
+    const [manualLeaveData, setManualLeaveData] = useState({});
+    const [isSubmittingManualLeave, setIsSubmittingManualLeave] = useState(false);
+    const [customReportStartDate, setCustomReportStartDate] = useState('');
+    const [customReportEndDate, setCustomReportEndDate] = useState('');
+    const [isResettingShortLeave, setIsResettingShortLeave] = useState(false);
 
     useEffect(() => {
         const usersUnsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
@@ -329,26 +334,157 @@ export default function HRManagerDashboard() {
         }
     };
 
+    const handleManualLeaveSubmit = async (e) => {
+        e.preventDefault();
+
+        try {
+            setIsSubmittingManualLeave(true);
+            setMessage(null);
+
+            const { employeeId, type, startDate, endDate, leaveUnits, reason } = manualLeaveData;
+
+            if (!employeeId || !startDate || !endDate || leaveUnits === undefined || leaveUnits < 0) {
+                throw new Error('Please fill in all required fields with valid values.');
+            }
+
+            if (new Date(endDate) < new Date(startDate)) {
+                throw new Error('End date must be after start date.');
+            }
+
+            const selectedUser = users[employeeId];
+            if (!selectedUser) {
+                throw new Error('Selected employee not found.');
+            }
+
+            // Create the manual leave request
+            const requestData = {
+                userId: employeeId,
+                userName: selectedUser.name,
+                managerId: selectedUser.managerId || userData.uid, // Use HR as manager if none assigned
+                department: selectedUser.department,
+                type,
+                startDate: new Date(startDate),
+                endDate: new Date(endDate),
+                reason: reason || 'Manual leave entry by HR',
+                status: 'Approved', // Directly approved
+                appliedOn: new Date(),
+                leaveUnits,
+                totalDays: leaveUnits, // For simplicity, assume leaveUnits equals totalDays
+                hrManagerApproval: 'Approved',
+                hrManagerActionBy: userData.name,
+                hrApprovalDate: new Date().toISOString(),
+                isManualEntry: true,
+                manualEntryBy: userData.name,
+                manualEntryDate: new Date().toISOString()
+            };
+
+            // Add to leaveRequests collection
+            await addDoc(collection(db, "leaveRequests"), requestData);
+
+            // Deduct leave balance
+            const requestForDeduction = {
+                userId: employeeId,
+                type,
+                leaveUnits,
+                startDate: new Date(startDate),
+                endDate: new Date(endDate)
+            };
+            await deductLeaveBalance(requestForDeduction);
+
+            setMessage({ type: 'success', text: `Manual leave entry created successfully for ${selectedUser.name}. Balance has been deducted.` });
+
+            // Reset form
+            setManualLeaveData({});
+
+        } catch (error) {
+            console.error('Error creating manual leave entry:', error);
+            setMessage({ type: 'error', text: `Error creating manual leave entry: ${error.message}` });
+        } finally {
+            setIsSubmittingManualLeave(false);
+        }
+    };
+
+    const generateCustomReport = async () => {
+        if (!customReportStartDate || !customReportEndDate) {
+            setMessage({ type: 'error', text: 'Please select both start and end dates for the custom report.' });
+            return;
+        }
+
+        if (new Date(customReportEndDate) < new Date(customReportStartDate)) {
+            setMessage({ type: 'error', text: 'End date must be after start date.' });
+            return;
+        }
+
+        await generateMonthlyReport(true, customReportStartDate, customReportEndDate);
+    };
+
+    const resetShortLeaveBalances = async () => {
+        try {
+            setIsResettingShortLeave(true);
+            setMessage(null);
+
+            const confirmMsg = `This will reset short leave balance to 1 for ALL employees. This action cannot be undone. Continue?`;
+            if (typeof window !== 'undefined' && !window.confirm(confirmMsg)) {
+                return;
+            }
+
+            const batch = [];
+            const currentDate = new Date().toISOString();
+
+            // Update all users' short leave balance to 1
+            for (const user of Object.values(users)) {
+                const userRef = doc(db, "users", user.uid || user.id);
+                batch.push(updateDoc(userRef, {
+                    'leaveBalance.shortLeave': 1,
+                    'leaveAllocations.shortLeave': 1,
+                    shortLeaveLastReset: currentDate,
+                    shortLeaveResetBy: userData.name
+                }));
+            }
+
+            // Execute all updates
+            await Promise.all(batch);
+
+            setMessage({
+                type: 'success',
+                text: `Short leave balances have been reset to 1 for all ${Object.keys(users).length} employees.`
+            });
+
+        } catch (error) {
+            console.error('Error resetting short leave balances:', error);
+            setMessage({ type: 'error', text: `Error resetting short leave balances: ${error.message}` });
+        } finally {
+            setIsResettingShortLeave(false);
+        }
+    };
+
     const pendingHRRequests = allRequests.filter(r => r.status === 'Pending HR Approval');
     const pendingFinalHRRequests = allRequests.filter(r => r.status === 'Pending HR Approval' && r.hrManagerApproval !== 'Approved');
 
-    // Function to generate monthly report (25th to 25th)
-    const generateMonthlyReport = async () => {
+    // Function to generate monthly report (25th to 25th or custom range)
+    const generateMonthlyReport = async (useCustomRange = false, customStart = null, customEnd = null) => {
         setIsGeneratingReport(true);
         try {
-            const now = new Date();
-            const currentYear = now.getFullYear();
-            const currentMonth = now.getMonth();
+            let startDate, endDate;
 
-            // Calculate date range: 25th of previous month to 25th of current month
-            const startDate = new Date(currentYear, currentMonth - 1, 25);
-            const endDate = new Date(currentYear, currentMonth, 25);
+            if (useCustomRange && customStart && customEnd) {
+                startDate = new Date(customStart);
+                endDate = new Date(customEnd);
+            } else {
+                const now = new Date();
+                const currentYear = now.getFullYear();
+                const currentMonth = now.getMonth();
 
-            // If we're before the 25th of current month, adjust the range
-            if (now.getDate() < 25) {
-                startDate.setMonth(currentMonth - 2);
-                endDate.setMonth(currentMonth - 1);
-                endDate.setDate(25);
+                // Calculate date range: 25th of previous month to 25th of current month
+                startDate = new Date(currentYear, currentMonth - 1, 25);
+                endDate = new Date(currentYear, currentMonth, 25);
+
+                // If we're before the 25th of current month, adjust the range
+                if (now.getDate() < 25) {
+                    startDate.setMonth(currentMonth - 2);
+                    endDate.setMonth(currentMonth - 1);
+                    endDate.setDate(25);
+                }
             }
 
             console.log('Generating report for period:', startDate.toISOString(), 'to', endDate.toISOString());
@@ -364,6 +500,7 @@ export default function HRManagerDashboard() {
             const departmentStats = {};
             const leaveTypeStats = {};
             const userStats = {};
+            const noPayEmployees = [];
 
             reportRequests.forEach(request => {
                 const user = users[request.userId];
@@ -407,6 +544,24 @@ export default function HRManagerDashboard() {
                 });
             });
 
+            // Check for employees with negative leave balances (no pay status)
+            Object.values(users).forEach(user => {
+                if (user.leaveBalance) {
+                    const hasNegativeBalance = Object.values(user.leaveBalance).some(balance => balance < 0);
+                    if (hasNegativeBalance) {
+                        noPayEmployees.push({
+                            id: user.uid || user.id,
+                            name: user.name,
+                            department: user.department || 'N/A',
+                            leaveBalance: user.leaveBalance,
+                            noPayStatus: user.noPayStatus || false,
+                            noPayStartDate: user.noPayStartDate,
+                            noPayEndDate: user.noPayEndDate
+                        });
+                    }
+                }
+            });
+
             const report = {
                 period: {
                     start: startDate,
@@ -422,6 +577,7 @@ export default function HRManagerDashboard() {
                 departmentStats,
                 leaveTypeStats,
                 userStats,
+                noPayEmployees,
                 requests: reportRequests
             };
 
@@ -499,6 +655,47 @@ export default function HRManagerDashboard() {
             });
 
             yPosition += 10;
+
+            // No Pay Employees Section
+            if (monthlyReport.noPayEmployees && monthlyReport.noPayEmployees.length > 0) {
+                checkAndAddPage(15);
+                pdf.setFontSize(14);
+                pdf.setFont('helvetica', 'bold');
+                pdf.text('Employees on No Pay Status', 20, yPosition);
+                yPosition += 10;
+
+                pdf.setFontSize(10);
+                pdf.setFont('helvetica', 'normal');
+
+                // Table headers
+                pdf.text('Employee', 20, yPosition);
+                pdf.text('Department', 70, yPosition);
+                pdf.text('Leave Balances', 120, yPosition);
+                pdf.text('No Pay Start', 170, yPosition);
+                yPosition += 8;
+
+                // Table data
+                monthlyReport.noPayEmployees.forEach((employee) => {
+                    checkAndAddPage(12);
+                    pdf.text(employee.name.substring(0, 15), 20, yPosition);
+                    pdf.text(employee.department.substring(0, 15), 70, yPosition);
+
+                    // Leave balances
+                    let balanceText = '';
+                    Object.entries(employee.leaveBalance).forEach(([type, balance]) => {
+                        balanceText += `${type}: ${balance < 0 ? balance : balance}, `;
+                    });
+                    balanceText = balanceText.slice(0, -2); // Remove last comma and space
+                    pdf.text(balanceText.substring(0, 25), 120, yPosition);
+
+                    // No pay start date
+                    const noPayDate = employee.noPayStartDate ? new Date(employee.noPayStartDate).toLocaleDateString() : 'N/A';
+                    pdf.text(noPayDate, 170, yPosition);
+                    yPosition += 8;
+                });
+
+                yPosition += 10;
+            }
 
             // Department Statistics
             checkAndAddPage(15);
@@ -620,6 +817,7 @@ export default function HRManagerDashboard() {
             annualLeave: user.leaveBalance?.annualLeave || 0,
             sickLeave: user.leaveBalance?.sickLeave || 0,
             casualLeave: user.leaveBalance?.casualLeave || 0,
+            shortLeave: user.leaveBalance?.shortLeave || 0,
             maternityLeave: user.leaveBalance?.maternityLeave || 0,
             paternityLeave: user.leaveBalance?.paternityLeave || 0,
             'leave in-lieu': user.leaveBalance?.['leave in-lieu'] || 0,
@@ -628,6 +826,7 @@ export default function HRManagerDashboard() {
             annualLeaveTotal: user.leaveAllocations?.annualLeave ?? 0,
             sickLeaveTotal: user.leaveAllocations?.sickLeave ?? 0,
             casualLeaveTotal: user.leaveAllocations?.casualLeave ?? 0,
+            shortLeaveTotal: user.leaveAllocations?.shortLeave ?? 0,
             maternityLeaveTotal: user.leaveAllocations?.maternityLeave ?? 0,
             paternityLeaveTotal: user.leaveAllocations?.paternityLeave ?? 0
         });
@@ -666,6 +865,7 @@ export default function HRManagerDashboard() {
                 annualLeave: editBalanceData.annualLeave || 0,
                 sickLeave: editBalanceData.sickLeave || 0,
                 casualLeave: editBalanceData.casualLeave || 0,
+                shortLeave: editBalanceData.shortLeave || 0,
                 maternityLeave: editBalanceData.maternityLeave || 0,
                 paternityLeave: editBalanceData.paternityLeave || 0,
                 'leave in-lieu': editBalanceData['leave in-lieu'] || 0,
@@ -678,6 +878,7 @@ export default function HRManagerDashboard() {
                 annualLeave: editBalanceData.annualLeaveTotal || 0,
                 sickLeave: editBalanceData.sickLeaveTotal || 0,
                 casualLeave: editBalanceData.casualLeaveTotal || 0,
+                shortLeave: editBalanceData.shortLeaveTotal || 0,
                 maternityLeave: editBalanceData.maternityLeaveTotal || 0,
                 paternityLeave: editBalanceData.paternityLeaveTotal || 0
             };
@@ -758,6 +959,26 @@ export default function HRManagerDashboard() {
                     >
                         Monthly Reports
                     </button>
+                    <button
+                        onClick={() => setActiveTab('manual')}
+                        className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                            activeTab === 'manual'
+                                ? 'border-blue-500 text-blue-400'
+                                : 'border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-300'
+                        }`}
+                    >
+                        Manual Leave Entry
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('shortleave')}
+                        className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                            activeTab === 'shortleave'
+                                ? 'border-blue-500 text-blue-400'
+                                : 'border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-300'
+                        }`}
+                    >
+                        Short Leave Reset
+                    </button>
                 </nav>
             </div>
             
@@ -815,6 +1036,7 @@ export default function HRManagerDashboard() {
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Annual Leave</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Sick Leave</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Casual Leave</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Short Leave</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Maternity Leave</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Paternity Leave</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Leave in-lieu</th>
@@ -850,6 +1072,7 @@ export default function HRManagerDashboard() {
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.annualLeave)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.sickLeave)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.casualLeave)}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.shortLeave)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.maternityLeave)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.paternityLeave)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.['leave in-lieu'])}</td>
@@ -911,15 +1134,47 @@ export default function HRManagerDashboard() {
                             <div className="space-y-6">
                                 <div className="bg-muted p-6 rounded-lg">
                                     <h3 className="text-lg font-medium text-slate-200 mb-4">Monthly Report Generator</h3>
-                                    <p className="text-slate-400 mb-6">
-                                        Generate a comprehensive report of all leave requests from the 25th of the previous month to the 25th of the current month.
-                                    </p>
+                                    
                                     <button
-                                        onClick={generateMonthlyReport}
+                                        onClick={() => generateMonthlyReport(false)}
                                         disabled={isGeneratingReport}
-                                        className="bg-blue-600 text-white px-6 py-3 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="bg-blue-600 text-white px-6 py-3 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed mr-4"
                                     >
                                         {isGeneratingReport ? 'Generating Report...' : 'Generate Monthly Report'}
+                                    </button>
+                                </div>
+
+                                <div className="bg-muted p-6 rounded-lg">
+                                    <h3 className="text-lg font-medium text-slate-200 mb-4">Custom Date Range Report</h3>
+                                    <p className="text-slate-400 mb-6">
+                                        Generate a report for a specific date range of your choice.
+                                    </p>
+                                    <div className="grid grid-cols-2 gap-4 mb-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Start Date</label>
+                                            <input
+                                                type="date"
+                                                value={customReportStartDate}
+                                                onChange={(e) => setCustomReportStartDate(e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md bg-card text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">End Date</label>
+                                            <input
+                                                type="date"
+                                                value={customReportEndDate}
+                                                onChange={(e) => setCustomReportEndDate(e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md bg-card text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={generateCustomReport}
+                                        disabled={isGeneratingReport || !customReportStartDate || !customReportEndDate}
+                                        className="bg-green-600 text-white px-6 py-3 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {isGeneratingReport ? 'Generating Report...' : 'Generate Custom Report'}
                                     </button>
                                 </div>
                             </div>
@@ -1002,6 +1257,53 @@ export default function HRManagerDashboard() {
                                     </div>
 
 
+                                    {/* No Pay Employees Section */}
+                                    {monthlyReport.noPayEmployees && monthlyReport.noPayEmployees.length > 0 && (
+                                        <div className="mb-8">
+                                            <h4 className="text-md font-medium text-slate-200 mb-4">Employees on No Pay Status</h4>
+                                            <div className="overflow-x-scroll h-64 overflow-y-auto">
+                                                <table className="min-w-full divide-y divide-gray-700">
+                                                    <thead className="bg-muted">
+                                                        <tr>
+                                                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Employee</th>
+                                                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Department</th>
+                                                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Leave Balances</th>
+                                                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">No Pay Start</th>
+                                                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Status</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="bg-card divide-y divide-gray-700">
+                                                        {monthlyReport.noPayEmployees.map((employee) => (
+                                                            <tr key={employee.id}>
+                                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-200">{employee.name}</td>
+                                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{employee.department}</td>
+                                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+                                                                    <div className="space-y-1">
+                                                                        {Object.entries(employee.leaveBalance).map(([type, balance]) => (
+                                                                            <div key={type} className={`text-xs ${balance < 0 ? 'text-red-400 font-semibold' : 'text-slate-400'}`}>
+                                                                                {type}: {formatLeaveBalance(balance)}
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </td>
+                                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+                                                                    {employee.noPayStartDate ? new Date(employee.noPayStartDate).toLocaleDateString() : 'N/A'}
+                                                                </td>
+                                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                                                        employee.noPayStatus ? 'bg-red-900/30 text-red-400' : 'bg-yellow-900/30 text-yellow-400'
+                                                                    }`}>
+                                                                        {employee.noPayStatus ? 'On No Pay' : 'Negative Balance'}
+                                                                    </span>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {/* Detailed Request List */}
                                     <div>
                                         <h4 className="text-md font-medium text-slate-200 mb-4">Detailed Request List</h4>
@@ -1052,8 +1354,154 @@ export default function HRManagerDashboard() {
                         )}
                     </div>
                 )}
+
+                {activeTab === 'manual' && (
+                    <div className="p-6">
+                        <div className="bg-muted p-6 rounded-lg">
+                            <h3 className="text-lg font-medium text-slate-200 mb-4">Manual Leave Entry</h3>
+                            <p className="text-slate-400 mb-6">
+                                Add leave manually for employees. This will create an approved leave request and deduct from their balance.
+                            </p>
+
+                            <form onSubmit={handleManualLeaveSubmit} className="space-y-4">
+                                {/* Employee Selection */}
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Select Employee</label>
+                                    <select
+                                        value={manualLeaveData.employeeId || ''}
+                                        onChange={(e) => setManualLeaveData(prev => ({ ...prev, employeeId: e.target.value }))}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md bg-card text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        required
+                                    >
+                                        <option value="">Choose an employee...</option>
+                                        {Object.values(filteredUsers).map(user => (
+                                            <option key={user.uid || user.id} value={user.uid || user.id}>
+                                                {user.name} - {user.employeeNumber || 'No ID'} - {user.department || 'No Dept'}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {/* Leave Type */}
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Leave Type</label>
+                                    <select
+                                        value={manualLeaveData.type || 'Annual Leave'}
+                                        onChange={(e) => setManualLeaveData(prev => ({ ...prev, type: e.target.value }))}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md bg-card text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                        {LEAVE_TYPES.map((leaveType, index) => (
+                                            <option key={index} value={leaveType.value}>{leaveType.label}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {/* Date Range */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-300 mb-1">Start Date</label>
+                                        <input
+                                            type="date"
+                                            value={manualLeaveData.startDate || ''}
+                                            onChange={(e) => setManualLeaveData(prev => ({ ...prev, startDate: e.target.value }))}
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md bg-card text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            required
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-300 mb-1">End Date</label>
+                                        <input
+                                            type="date"
+                                            value={manualLeaveData.endDate || ''}
+                                            onChange={(e) => setManualLeaveData(prev => ({ ...prev, endDate: e.target.value }))}
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md bg-card text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            required
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Leave Units */}
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Leave Units (Days)</label>
+                                    <input
+                                        type="number"
+                                        step="0.5"
+                                        min="0"
+                                        value={manualLeaveData.leaveUnits || ''}
+                                        onChange={(e) => setManualLeaveData(prev => ({ ...prev, leaveUnits: parseFloat(e.target.value) || 0 }))}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md bg-card text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        required
+                                    />
+                                    <p className="text-xs text-slate-400 mt-1">Number of leave days to deduct from balance</p>
+                                </div>
+
+                                {/* Reason */}
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Reason</label>
+                                    <textarea
+                                        value={manualLeaveData.reason || ''}
+                                        onChange={(e) => setManualLeaveData(prev => ({ ...prev, reason: e.target.value }))}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md bg-card text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        rows="3"
+                                        placeholder="Reason for manual leave entry"
+                                        required
+                                    />
+                                </div>
+
+                                {/* Submit Button */}
+                                <div className="flex justify-end">
+                                    <button
+                                        type="submit"
+                                        disabled={isSubmittingManualLeave}
+                                        className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {isSubmittingManualLeave ? 'Adding Leave...' : 'Add Manual Leave'}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === 'shortleave' && (
+                    <div className="p-6">
+                        <div className="bg-muted p-6 rounded-lg">
+                            <h3 className="text-lg font-medium text-slate-200 mb-4">Short Leave Reset</h3>
+                            <p className="text-slate-400 mb-6">
+                                Reset short leave balances to 1 for all employees. This will be done monthly (1st-31st cycle).
+                            </p>
+
+                            <div className="space-y-4">
+                                <div className="bg-blue-900/20 border border-blue-500/30 p-4 rounded">
+                                    <h4 className="text-blue-300 font-medium mb-2">Current Short Leave Status</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        {Object.values(filteredUsers).map(user => (
+                                            <div key={user.uid || user.id} className="bg-slate-800/50 p-3 rounded">
+                                                <div className="text-sm font-medium text-slate-200">{user.name}</div>
+                                                <div className="text-xs text-slate-400">{user.employeeNumber || 'No ID'}</div>
+                                                <div className="text-sm text-indigo-300">
+                                                    Short Leave: {formatLeaveBalance(user.leaveBalance?.shortLeave || 0)}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="flex justify-end space-x-3">
+                                    <button
+                                        onClick={resetShortLeaveBalances}
+                                        disabled={isResettingShortLeave}
+                                        className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {isResettingShortLeave ? 'Resetting...' : 'Reset All Short Leave to 1'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
-            
+
             {/* Leave Request Modal */}
             {showLeaveModal && (
                 <LeaveRequestModal
@@ -1116,6 +1564,17 @@ export default function HRManagerDashboard() {
                                                 step="0.5"
                                                 value={editBalanceData.casualLeave}
                                                 onChange={(e) => handleBalanceChange('casualLeave', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Short Leave</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.shortLeave}
+                                                onChange={(e) => handleBalanceChange('shortLeave', e.target.value)}
                                                 className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
                                             />
                                         </div>
@@ -1200,6 +1659,17 @@ export default function HRManagerDashboard() {
                                                 step="0.5"
                                                 value={editBalanceData.casualLeaveTotal}
                                                 onChange={(e) => handleBalanceChange('casualLeaveTotal', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-green-500"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Short Leave Total</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.shortLeaveTotal}
+                                                onChange={(e) => handleBalanceChange('shortLeaveTotal', e.target.value)}
                                                 className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-green-500"
                                             />
                                         </div>

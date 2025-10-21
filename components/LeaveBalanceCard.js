@@ -25,6 +25,12 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
         const formatDaysText = (num) => {
             const formatted = formatNumber(num);
             const absNum = Math.abs(num);
+
+            // Special handling for short leave - show as "X total" instead of "X day/days"
+            if (type.key === 'shortLeave') {
+                return `${formatted} total`;
+            }
+
             return absNum === 1 ? `${formatted} day` : `${formatted} days`;
         };
 
@@ -61,6 +67,19 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
         const total = typeof allocation === 'number' ? allocation : 0;
         const used = Math.max(0, total - remaining);
         const percentageUsed = total > 0 ? (used / total) * 100 : 0;
+
+        // Special handling for short leave - show as count, not days
+        if (type.key === 'shortLeave') {
+            return {
+                mainNumber: formatNumber(remaining),
+                mainLabel: 'Remaining',
+                sub: `${formatNumber(total)} leave total`,
+                showProgress: true,
+                percentage: percentageUsed,
+                status: remaining <= 0 ? 'low' : 'good',
+                shouldDisplay: true
+            };
+        }
 
         return {
             mainNumber: formatDaysText(remaining),

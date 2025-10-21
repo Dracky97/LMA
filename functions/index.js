@@ -271,6 +271,42 @@ exports.sendPerformanceEvaluationReminders = onSchedule({
     }
 });
 
+exports.resetMonthlyShortLeave = onSchedule({
+    schedule: "0 0 1 * *",
+    timeZone: "Asia/Colombo",
+    region: "asia-southeast1"
+}, async (event) => {
+    console.log('Starting monthly short leave reset...');
+    try {
+        const usersSnapshot = await db.collection('users').get();
+        const currentDate = new Date().toISOString();
+        let resetCount = 0;
+
+        const batch = db.batch();
+
+        for (const doc of usersSnapshot.docs) {
+            const userData = doc.data();
+            const userRef = db.collection('users').doc(doc.id);
+
+            // Reset short leave balance to 1 for all users
+            batch.update(userRef, {
+                'leaveBalance.shortLeave': 1,
+                'leaveAllocations.shortLeave': 1,
+                shortLeaveLastReset: currentDate,
+                shortLeaveResetBy: 'Automated System'
+            });
+
+            resetCount++;
+        }
+
+        await batch.commit();
+
+        console.log(`Successfully reset short leave balances for ${resetCount} users`);
+    } catch (error) {
+        console.error('Error resetting monthly short leave:', error);
+    }
+});
+
 exports.onPerformanceEvaluationComplete = onDocumentUpdated({
     document: "users/{userId}",
     region: "asia-southeast1"

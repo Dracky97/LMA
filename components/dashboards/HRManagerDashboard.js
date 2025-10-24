@@ -205,27 +205,36 @@ export default function HRManagerDashboard() {
             });
 
             // Check if any leave balance is going negative and update noPay status
+            // Skip noPay status updates for manual entries (administrative adjustments)
+            const isManualEntry = request.isManualEntry || false;
             const updatedLeaveBalance = { ...currentData.leaveBalance, [leaveType]: newBalance };
             const hasNegativeBalance = Object.values(updatedLeaveBalance).some(balance => balance < 0);
             const currentlyOnNoPay = currentData.noPayStatus || false;
 
-            // Update noPay status if transitioning to/from negative balance
-            if (hasNegativeBalance && !currentlyOnNoPay) {
-                // Starting no pay period
-                await updateDoc(userRef, {
-                    [`leaveBalance.${leaveType}`]: newBalance,
-                    noPayStatus: true,
-                    noPayStartDate: new Date().toISOString()
-                });
-            } else if (!hasNegativeBalance && currentlyOnNoPay) {
-                // Ending no pay period
-                await updateDoc(userRef, {
-                    [`leaveBalance.${leaveType}`]: newBalance,
-                    noPayStatus: false,
-                    noPayEndDate: new Date().toISOString()
-                });
+            // Update noPay status if transitioning to/from negative balance (skip for manual entries)
+            if (!isManualEntry) {
+                if (hasNegativeBalance && !currentlyOnNoPay) {
+                    // Starting no pay period
+                    await updateDoc(userRef, {
+                        [`leaveBalance.${leaveType}`]: newBalance,
+                        noPayStatus: true,
+                        noPayStartDate: new Date().toISOString()
+                    });
+                } else if (!hasNegativeBalance && currentlyOnNoPay) {
+                    // Ending no pay period
+                    await updateDoc(userRef, {
+                        [`leaveBalance.${leaveType}`]: newBalance,
+                        noPayStatus: false,
+                        noPayEndDate: new Date().toISOString()
+                    });
+                } else {
+                    // No status change needed
+                    await updateDoc(userRef, {
+                        [`leaveBalance.${leaveType}`]: newBalance
+                    });
+                }
             } else {
-                // No status change needed
+                // Manual entry - just update balance without noPay status changes
                 await updateDoc(userRef, {
                     [`leaveBalance.${leaveType}`]: newBalance
                 });

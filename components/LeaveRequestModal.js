@@ -541,7 +541,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                     value={substituteFor}
                                     onChange={(e) => setSubstituteFor(e.target.value)}
                                     className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
-                                    placeholder="Enter who you are substituting for"
+                                    placeholder="Please specify the date you are substituting for"
                                     required
                                 />
                             </div>

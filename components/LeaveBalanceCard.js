@@ -118,11 +118,6 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
         <div className="bg-card p-6 rounded-lg shadow-sm">
             <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-semibold text-slate-200">My Leave Balance</h2>
-                {isOnNoPay && (
-                    <div className="bg-red-900/30 text-red-300 px-3 py-1 rounded-full text-sm font-medium border border-red-500/30">
-                        ⚠️ No Pay Status
-                    </div>
-                )}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {displayableLeaveTypes.map((type, index) => {

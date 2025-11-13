@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import DashboardLayout from '../../components/DashboardLayout';
 import { useAuth } from '../../context/AuthContext';
-import { getFirestore, doc, updateDoc } from 'firebase/firestore';
+import { getFirestore, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { app } from '../../lib/firebase-client';
 import { useRouter } from 'next/router';
@@ -10,8 +10,9 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 
 export default function EditProfilePage() {
-    const { user, userData, changePassword } = useAuth();
+    const { user, userData: currentUserData, changePassword } = useAuth();
     const router = useRouter();
+    const { userId } = router.query; // Get userId from query params for HR editing other profiles
     const [formData, setFormData] = useState(null);
     const [profileImage, setProfileImage] = useState(null);
     const [coverImage, setCoverImage] = useState(null);
@@ -23,30 +24,71 @@ export default function EditProfilePage() {
     // Password reset state (simplified)
     const [passwordLoading, setPasswordLoading] = useState(false);
     const [passwordSuccess, setPasswordSuccess] = useState('');
+    const [targetUserData, setTargetUserData] = useState(null); // Data of the user being edited
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        if (userData) {
-            setFormData({
-                name: userData.name || '',
-                employeeNumber: userData.employeeNumber || '',
-                designation: userData.designation || '',
-                personalDetails: userData.personalDetails || { phone: '', address: '', dob: '' },
-                socialMedia: userData.socialMedia || { linkedin: '', twitter: '' },
-                education: userData.education || [],
-                qualifications: userData.qualifications || [],
-                profileImageUrl: userData.profileImageUrl || '',
-                coverImageUrl: userData.coverImageUrl || ''
-            });
-            
-            // Set previews if images already exist
-            if (userData.profileImageUrl) {
-                setProfileImagePreview(userData.profileImageUrl);
+        const fetchUserData = async () => {
+            console.log('EditProfile: useEffect triggered', { userId, currentUserData: currentUserData?.uid, role: currentUserData?.role });
+
+            let userToEdit = currentUserData;
+
+            // If userId is provided and current user is HR manager, fetch the target user's data
+            if (userId && userId !== currentUserData?.uid &&
+                (currentUserData?.role === 'Admin' || currentUserData?.role === 'HR Manager' || currentUserData?.role?.includes('Manager HR'))) {
+                console.log('EditProfile: Fetching target user data for userId:', userId);
+                try {
+                    const userDocRef = doc(db, 'users', userId);
+                    const docSnap = await getDoc(userDocRef);
+                    if (docSnap.exists()) {
+                        userToEdit = docSnap.data();
+                        setTargetUserData(userToEdit);
+                        console.log('EditProfile: Target user data loaded:', userToEdit.name);
+                    } else {
+                        console.error('EditProfile: User document does not exist for userId:', userId);
+                        setErrors({ submit: 'User not found' });
+                        return;
+                    }
+                } catch (error) {
+                    console.error("Error fetching user data:", error);
+                    setErrors({ submit: 'Failed to load user data' });
+                    return;
+                }
+            } else {
+                console.log('EditProfile: Using current user data or not authorized');
             }
-            if (userData.coverImageUrl) {
-                setCoverImagePreview(userData.coverImageUrl);
+
+            if (userToEdit) {
+                setFormData({
+                    name: userToEdit.name || '',
+                    employeeNumber: userToEdit.employeeNumber || '',
+                    designation: userToEdit.designation || '',
+                    personalDetails: userToEdit.personalDetails || { phone: '', address: '', dob: '' },
+                    socialMedia: userToEdit.socialMedia || { linkedin: '', twitter: '' },
+                    education: userToEdit.education || [],
+                    qualifications: userToEdit.qualifications || [],
+                    emergencyContacts: userToEdit.emergencyContacts || [],
+                    profileImageUrl: userToEdit.profileImageUrl || '',
+                    coverImageUrl: userToEdit.coverImageUrl || '',
+                    gender: userToEdit.gender || ''
+                });
+
+                // Set previews if images already exist
+                if (userToEdit.profileImageUrl) {
+                    setProfileImagePreview(userToEdit.profileImageUrl);
+                }
+                if (userToEdit.coverImageUrl) {
+                    setCoverImagePreview(userToEdit.coverImageUrl);
+                }
             }
+
+            setLoading(false);
+        };
+
+        if (currentUserData) {
+            fetchUserData();
         }
-    }, [userData]);
+    }, [userId, currentUserData]);
 
     const handleChange = (e, section, index = null, subSection = null) => {
         const { name, value } = e.target;
@@ -206,56 +248,75 @@ export default function EditProfilePage() {
         }));
     };
 
+    const addEmergencyContact = () => {
+        if (formData.emergencyContacts.length >= 2) return; // Limit to 2 contacts
+        setFormData(prev => ({
+            ...prev,
+            emergencyContacts: [...prev.emergencyContacts, { name: '', phone: '', relationship: '' }]
+        }));
+    };
+
+    const removeEmergencyContact = (index) => {
+        setFormData(prev => ({
+            ...prev,
+            emergencyContacts: prev.emergencyContacts.filter((_, i) => i !== index)
+        }));
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!userData) return;
-        
+        if (!currentUserData) return;
+
         // Check for validation errors
         if (errors.profileImage || errors.coverImage) {
             alert('Please fix image validation errors before submitting.');
             return;
         }
-        
+
         setIsUploading(true);
         setErrors({});
-        
+
         try {
+            // Determine which user to update
+            const targetUserId = userId && targetUserData ? userId : currentUserData.uid;
+            const targetUser = targetUserData || currentUserData;
+
             // Upload images if they exist
             let profileImageUrl = formData.profileImageUrl;
             let coverImageUrl = formData.coverImageUrl;
-            
+
             if (profileImage) {
                 profileImageUrl = await uploadImage(
                     profileImage,
-                    `profile-images/${userData.uid}/profile-${Date.now()}.jpg`
+                    `profile-images/${targetUserId}/profile-${Date.now()}.jpg`
                 );
                 if (!profileImageUrl) {
                     throw new Error('Failed to upload profile image');
                 }
             }
-            
+
             if (coverImage) {
                 coverImageUrl = await uploadImage(
                     coverImage,
-                    `profile-images/${userData.uid}/cover-${Date.now()}.jpg`
+                    `profile-images/${targetUserId}/cover-${Date.now()}.jpg`
                 );
                 if (!coverImageUrl) {
                     throw new Error('Failed to upload cover image');
                 }
             }
-            
+
             // Update form data with image URLs
             const updatedFormData = {
                 ...formData,
                 profileImageUrl: profileImageUrl || formData.profileImageUrl,
                 coverImageUrl: coverImageUrl || formData.coverImageUrl
             };
-            
-            const userDocRef = doc(db, 'users', userData.uid);
+
+            const userDocRef = doc(db, 'users', targetUserId);
             await updateDoc(userDocRef, updatedFormData);
-            
+
             // Success - redirect to profile
-            router.push(`/profile/${userData.uid}`);
+            router.push(`/profile/${targetUserId}`);
         } catch (error) {
             console.error("Error updating profile:", error);
             setErrors({ submit: 'Failed to update profile. Please try again.' });
@@ -294,13 +355,19 @@ export default function EditProfilePage() {
         }
     };
 
-    if (!formData) return <DashboardLayout><div>Loading...</div></DashboardLayout>;
+    if (loading || !formData) return <DashboardLayout><div>Loading...</div></DashboardLayout>;
+
+    // Determine if current user is HR manager editing someone else's profile
+    const isHREditingOther = userId && userId !== currentUserData?.uid &&
+        (currentUserData?.role === 'Admin' || currentUserData?.role === 'HR Manager' || currentUserData?.role?.includes('Manager HR'));
 
     return (
         <DashboardLayout>
             <div className="bg-card rounded-lg shadow-sm">
                 <div className="border-b border-gray-700 px-6 py-4">
-                    <h1 className="text-2xl font-bold text-slate-200">Edit Your Profile</h1>
+                    <h1 className="text-2xl font-bold text-slate-200">
+                        {isHREditingOther ? `Edit ${targetUserData?.name || 'Employee'}'s Profile` : 'Edit Your Profile'}
+                    </h1>
                 </div>
                 
                 <form onSubmit={handleSubmit} className="p-6 space-y-8">
@@ -398,28 +465,56 @@ export default function EditProfilePage() {
                                 />
                             </div>
                             
-                            <div>
-                                <label className="block text-sm font-medium text-slate-300 mb-1">Employee Number</label>
-                                <input
-                                    type="text"
-                                    name="employeeNumber"
-                                    value={formData.employeeNumber}
-                                    onChange={(e) => handleChange(e)}
-                                    className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                />
-                            </div>
-                            
-                            <div>
-                                <label className="block text-sm font-medium text-slate-300 mb-1">Designation</label>
-                                <input
-                                    type="text"
-                                    name="designation"
-                                    value={formData.designation}
-                                    onChange={(e) => handleChange(e)}
-                                    className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    placeholder="e.g., Senior Developer, Marketing Specialist"
-                                />
-                            </div>
+                            {/* Employee Number - only editable by HR Managers */}
+                            {(currentUserData?.role === 'Admin' || currentUserData?.role === 'HR Manager' || currentUserData?.role?.includes('Manager HR')) ? (
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Employee Number</label>
+                                    <input
+                                        type="text"
+                                        name="employeeNumber"
+                                        value={formData.employeeNumber}
+                                        onChange={(e) => handleChange(e)}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+                            ) : (
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Employee Number</label>
+                                    <input
+                                        type="text"
+                                        value={formData.employeeNumber}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-400 bg-gray-700 cursor-not-allowed"
+                                        disabled
+                                        title="Only HR Manager can edit this field"
+                                    />
+                                </div>
+                            )}
+
+                            {/* Designation - only editable by HR Managers */}
+                            {(currentUserData?.role === 'Admin' || currentUserData?.role === 'HR Manager' || currentUserData?.role?.includes('Manager HR')) ? (
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Designation</label>
+                                    <input
+                                        type="text"
+                                        name="designation"
+                                        value={formData.designation}
+                                        onChange={(e) => handleChange(e)}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        placeholder="e.g., Senior Developer, Marketing Specialist"
+                                    />
+                                </div>
+                            ) : (
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Designation</label>
+                                    <input
+                                        type="text"
+                                        value={formData.designation}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-400 bg-gray-700 cursor-not-allowed"
+                                        disabled
+                                        title="Only HR Manager can edit this field"
+                                    />
+                                </div>
+                            )}
                             
                             <div>
                                 <label className="block text-sm font-medium text-slate-300 mb-1">Date of Birth</label>
@@ -433,7 +528,7 @@ export default function EditProfilePage() {
                             </div>
                             
                             {/* Gender field - only visible to Admin/HR Manager */}
-                            {(userData?.role === 'Admin' || userData?.role === 'HR Manager' || userData?.role?.includes('Manager HR')) && (
+                            {(currentUserData?.role === 'Admin' || currentUserData?.role === 'HR Manager' || currentUserData?.role?.includes('Manager HR')) && (
                                 <div>
                                     <label className="block text-sm font-medium text-slate-300 mb-1">Gender</label>
                                     <select
@@ -606,7 +701,79 @@ export default function EditProfilePage() {
                             <p className="text-slate-500">No qualifications information added yet.</p>
                         )}
                     </div>
-                    
+
+                    {/* Emergency Contacts Section */}
+                    <div className="bg-muted p-6 rounded-lg">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-semibold text-slate-200">Emergency Contacts</h2>
+                            {formData.emergencyContacts.length < 2 && (
+                                <button
+                                    type="button"
+                                    onClick={addEmergencyContact}
+                                    className="bg-blue-600 text-white px-3 py-1 rounded-md text-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    Add Contact
+                                </button>
+                            )}
+                        </div>
+
+                        {formData.emergencyContacts.length > 0 ? (
+                            <div className="space-y-4">
+                                {formData.emergencyContacts.map((contact, index) => (
+                                    <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-4 p-4 bg-card rounded-md border border-gray-700">
+                                        <div className="md:col-span-4">
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Name</label>
+                                            <input
+                                                type="text"
+                                                name="name"
+                                                value={contact.name}
+                                                onChange={(e) => handleChange(e, 'emergencyContacts', index)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                placeholder="Full name"
+                                            />
+                                        </div>
+
+                                        <div className="md:col-span-4">
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Phone Number</label>
+                                            <input
+                                                type="text"
+                                                name="phone"
+                                                value={contact.phone}
+                                                onChange={(e) => handleChange(e, 'emergencyContacts', index)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                placeholder="Phone number"
+                                            />
+                                        </div>
+
+                                        <div className="md:col-span-3">
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Relationship</label>
+                                            <input
+                                                type="text"
+                                                name="relationship"
+                                                value={contact.relationship}
+                                                onChange={(e) => handleChange(e, 'emergencyContacts', index)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                placeholder="e.g., Spouse, Parent"
+                                            />
+                                        </div>
+
+                                        <div className="md:col-span-1 flex items-end">
+                                            <button
+                                                type="button"
+                                                onClick={() => removeEmergencyContact(index)}
+                                                className="w-full bg-red-600 text-white px-2 py-2 rounded-md text-sm hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
+                                            >
+                                                Remove
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <p className="text-slate-500">No emergency contacts added yet.</p>
+                        )}
+                    </div>
+
                     {/* Social Media Section */}
                     <div className="bg-muted p-6 rounded-lg">
                         <h2 className="text-xl font-semibold text-slate-200 mb-4">Social Media</h2>
@@ -635,90 +802,92 @@ export default function EditProfilePage() {
                         </div>
                     </div>
                     
-                    {/* Password Change Section */}
-                    <div className="bg-muted p-6 rounded-lg">
-                        <div className="flex justify-between items-center mb-4">
-                            <div>
-                                <h2 className="text-xl font-semibold text-slate-200">Security</h2>
-                                <p className="text-sm text-slate-400 mt-1">Change your account password</p>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => setShowPasswordSection(!showPasswordSection)}
-                                className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out"
-                            >
-                                {showPasswordSection ? 'Cancel' : 'Change Password'}
-                            </button>
-                        </div>
-                        
-                        {showPasswordSection && (
-                            <div className="space-y-4">
-                                {errors.password && (
-                                    <div className="bg-red-900/20 border border-red-500/50 rounded-md p-3">
-                                        <p className="text-red-400 text-sm">{errors.password}</p>
-                                    </div>
-                                )}
-
-                                {passwordSuccess && (
-                                    <div className="bg-green-900/20 border border-green-500/50 rounded-md p-3">
-                                        <p className="text-green-400 text-sm">{passwordSuccess}</p>
-                                    </div>
-                                )}
-
-                                <div className="bg-blue-900/20 border border-blue-500/50 rounded-md p-4">
-                                    <div className="flex items-start space-x-3">
-                                        <div className="flex-shrink-0">
-                                            <svg className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                                            </svg>
-                                        </div>
-                                        <div>
-                                            <h3 className="text-sm font-medium text-blue-300">Password Reset via Email</h3>
-                                            <p className="text-sm text-blue-200 mt-1">
-                                                A password reset link will be sent to <strong>{userData?.email}</strong>.
-                                                Click the link in your email to set a new password.
-                                            </p>
-                                        </div>
-                                    </div>
+                    {/* Password Change Section - only show when editing own profile */}
+                    {!isHREditingOther && (
+                        <div className="bg-muted p-6 rounded-lg">
+                            <div className="flex justify-between items-center mb-4">
+                                <div>
+                                    <h2 className="text-xl font-semibold text-slate-200">Security</h2>
+                                    <p className="text-sm text-slate-400 mt-1">Change your account password</p>
                                 </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPasswordSection(!showPasswordSection)}
+                                    className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out"
+                                >
+                                    {showPasswordSection ? 'Cancel' : 'Change Password'}
+                                </button>
+                            </div>
 
-                                <div className="flex justify-end space-x-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setShowPasswordSection(false);
-                                            setErrors(prev => ({ ...prev, password: null }));
-                                            setPasswordSuccess('');
-                                        }}
-                                        className="px-4 py-2 border border-gray-600 text-slate-300 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 transition duration-150 ease-in-out"
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        onClick={handlePasswordReset}
-                                        disabled={passwordLoading}
-                                        className={`px-4 py-2 rounded-md font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-150 ease-in-out ${
-                                            passwordLoading
-                                                ? 'bg-gray-400 cursor-not-allowed'
-                                                : 'bg-blue-600 hover:bg-blue-700 text-white'
-                                        }`}
-                                    >
-                                        {passwordLoading ? (
-                                            <div className="flex items-center">
-                                                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            {showPasswordSection && (
+                                <div className="space-y-4">
+                                    {errors.password && (
+                                        <div className="bg-red-900/20 border border-red-500/50 rounded-md p-3">
+                                            <p className="text-red-400 text-sm">{errors.password}</p>
+                                        </div>
+                                    )}
+
+                                    {passwordSuccess && (
+                                        <div className="bg-green-900/20 border border-green-500/50 rounded-md p-3">
+                                            <p className="text-green-400 text-sm">{passwordSuccess}</p>
+                                        </div>
+                                    )}
+
+                                    <div className="bg-blue-900/20 border border-blue-500/50 rounded-md p-4">
+                                        <div className="flex items-start space-x-3">
+                                            <div className="flex-shrink-0">
+                                                <svg className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                                </svg>
+                                            </div>
+                                            <div>
+                                                <h3 className="text-sm font-medium text-blue-300">Password Reset via Email</h3>
+                                                <p className="text-sm text-blue-200 mt-1">
+                                                    A password reset link will be sent to <strong>{currentUserData?.email}</strong>.
+                                                    Click the link in your email to set a new password.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-end space-x-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setShowPasswordSection(false);
+                                                setErrors(prev => ({ ...prev, password: null }));
+                                                setPasswordSuccess('');
+                                            }}
+                                            className="px-4 py-2 border border-gray-600 text-slate-300 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 transition duration-150 ease-in-out"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            onClick={handlePasswordReset}
+                                            disabled={passwordLoading}
+                                            className={`px-4 py-2 rounded-md font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-150 ease-in-out ${
+                                                passwordLoading
+                                                    ? 'bg-gray-400 cursor-not-allowed'
+                                                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                                            }`}
+                                        >
+                                            {passwordLoading ? (
+                                                <div className="flex items-center">
+                                                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                                 </svg>
                                                 Sending...
-                                            </div>
-                                        ) : (
-                                            'Send Reset Email'
-                                        )}
-                                    </button>
+                                                </div>
+                                            ) : (
+                                                'Send Reset Email'
+                                            )}
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
-                        )}
-                    </div>
+                            )}
+                        </div>
+                    )}
                     
                     {errors.submit && (
                         <div className="bg-red-900/20 border border-red-500/50 rounded-md p-4 mb-4">

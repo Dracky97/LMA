@@ -68,8 +68,9 @@ export default function ProfilePage() {
     if (loading) return <DashboardLayout><div>Loading profile...</div></DashboardLayout>;
     if (!profileData) return <DashboardLayout><div>User not found.</div></DashboardLayout>;
 
-    const canEdit = currentUserData?.uid === userId || currentUserData?.role === 'Admin';
+    const canEdit = currentUserData?.uid === userId || currentUserData?.role === 'Admin' || currentUserData?.role === 'HR Manager' || currentUserData?.role?.includes('Manager HR');
     const canEditEvaluation = currentUserData?.role === 'Admin' || currentUserData?.role === 'Manager HR' || currentUserData?.role === 'HR Manager';
+    const canViewEmergencyContacts = currentUserData?.role === 'Admin' || currentUserData?.role === 'Manager HR' || currentUserData?.role === 'HR Manager';
 
     // Debug logging for role checking
     console.log('Current user role:', currentUserData?.role);
@@ -126,7 +127,7 @@ export default function ProfilePage() {
                         </div>
                         {canEdit && (
                             <button
-                                onClick={() => router.push(`/profile/edit`)}
+                                onClick={() => router.push(`/profile/edit${currentUserData?.uid !== userId ? `?userId=${userId}` : ''}`)}
                                 className="bg-blue-600 text-white px-6 py-2 rounded-full text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition duration-150 ease-in-out"
                             >
                                 Edit Profile
@@ -194,6 +195,25 @@ export default function ProfilePage() {
                                 </div>
                             </div>
                         </div>
+
+                        {canViewEmergencyContacts && (
+                            <div className="bg-muted p-6 rounded-lg">
+                                <h3 className="text-lg font-semibold text-slate-200 mb-4">Emergency Contacts</h3>
+                                {profileData.emergencyContacts && profileData.emergencyContacts.length > 0 ? (
+                                    <div className="space-y-3">
+                                        {profileData.emergencyContacts.map((contact, index) => (
+                                            <div key={index} className="border-l-2 border-red-500 pl-4 py-2">
+                                                <h4 className="font-medium text-slate-200">{contact.name}</h4>
+                                                <p className="text-slate-400">{contact.phone}</p>
+                                                <p className="text-sm text-slate-500">{contact.relationship}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-slate-500">No emergency contacts provided.</p>
+                                )}
+                            </div>
+                        )}
                     </div>
 
                     {/* Right Column - Education and Qualifications */}

@@ -23,6 +23,12 @@ export default function LeaveRequestModal({ userData, onClose }) {
     const [useGranularSelection, setUseGranularSelection] = useState(false);
     const [dateConfigurations, setDateConfigurations] = useState({});
 
+    // Predefined half-day options
+    const HALF_DAY_OPTIONS = [
+        { label: 'Morning Half-Day (08:00 AM - 12:30 PM)', startTime: '08:00', endTime: '12:30', duration: 270 },
+        { label: 'Afternoon Half-Day (12:30 PM - 05:00 PM)', startTime: '12:30', endTime: '17:00', duration: 270 }
+    ];
+
     // Filter leave types based on user's gender using shared configuration
     const filteredLeaveTypes = getFilteredLeaveTypes(userData.gender);
 
@@ -139,12 +145,12 @@ export default function LeaveRequestModal({ userData, onClose }) {
 
                 let units = 0;
 
-                // For all leave types
+                // For all leave types - Updated to handle standardized half-day timing
                 if (diffMinutes <= 90) {
                     units = 0;
-                } else if (diffMinutes > 90 && diffMinutes < 240) {
+                } else if (diffMinutes > 90 && diffMinutes <= 270) {
                     units = 0.5;
-                } else if (diffMinutes >= 240) {
+                } else if (diffMinutes > 270) {
                     units = 1;
                 }
                 
@@ -389,34 +395,28 @@ export default function LeaveRequestModal({ userData, onClose }) {
 
 
                                                 {config.type === 'half' && (
-                                                    <div className="grid grid-cols-2 gap-2">
+                                                    <div className="space-y-2">
                                                         <div>
-                                                            <label className="block text-xs text-slate-400 mb-1">Start Time</label>
-                                                            <input
-                                                                type="time"
-                                                                value={config.startTime || ''}
-                                                                onChange={(e) => handleDateConfigurationChange(date, {
-                                                                    ...config,
-                                                                    startTime: e.target.value
-                                                                })}
-                                                                min="08:00"
-                                                                max="17:00"
+                                                            <label className="block text-xs text-slate-400 mb-1">Half-Day Option</label>
+                                                            <select
+                                                                value={`${config.startTime || ''}-${config.endTime || ''}`}
+                                                                onChange={(e) => {
+                                                                    const [startTime, endTime] = e.target.value.split('-');
+                                                                    handleDateConfigurationChange(date, {
+                                                                        ...config,
+                                                                        startTime: startTime || '',
+                                                                        endTime: endTime || ''
+                                                                    });
+                                                                }}
                                                                 className="w-full px-2 py-1 border border-gray-600 rounded text-xs bg-card text-slate-200"
-                                                            />
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-xs text-slate-400 mb-1">End Time</label>
-                                                            <input
-                                                                type="time"
-                                                                value={config.endTime || ''}
-                                                                onChange={(e) => handleDateConfigurationChange(date, {
-                                                                    ...config,
-                                                                    endTime: e.target.value
-                                                                })}
-                                                                min="08:00"
-                                                                max="17:00"
-                                                                className="w-full px-2 py-1 border border-gray-600 rounded text-xs bg-card text-slate-200"
-                                                            />
+                                                            >
+                                                                <option value="">Select half-day timing</option>
+                                                                {HALF_DAY_OPTIONS.map((option, index) => (
+                                                                    <option key={index} value={`${option.startTime}-${option.endTime}`}>
+                                                                        {option.label}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
                                                         </div>
                                                     </div>
                                                 )}
@@ -442,38 +442,81 @@ export default function LeaveRequestModal({ userData, onClose }) {
                             <div className="mb-4">
                                 <label className="block text-sm font-medium text-slate-300 mb-2">Time Range (Optional)</label>
                                 <div className="text-xs text-slate-400 mb-2">
-                                    Select time range for half-day requests or to specify exact hours
+                                    Select predefined half-day option or custom time range for partial day requests
                                 </div>
 
-                                <div className="text-xs text-slate-400 mb-2">
+                                <div className="text-xs text-slate-400 mb-3">
                                     Business hours: 8:00 AM - 5:00 PM only<br/>
+                                    Half-day timing should be either 08:00 AM - 12:30 PM or 12:30 PM - 05:00 PM
                                 </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-xs text-slate-400 mb-1">From</label>
-                                        <input
-                                            type="time"
-                                            value={startTime}
-                                            onChange={(e) => setStartTime(e.target.value)}
-                                            min="08:00"
-                                            max="17:00"
-                                            step="60"
-                                            className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs text-slate-400 mb-1">To</label>
-                                        <input
-                                            type="time"
-                                            value={endTime}
-                                            onChange={(e) => setEndTime(e.target.value)}
-                                            min="08:00"
-                                            max="17:00"
-                                            step="60"
-                                            className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
-                                        />
-                                    </div>
+
+                                {/* Predefined Half-Day Options */}
+                                <div className="space-y-2 mb-4">
+                                    <label className="block text-sm font-medium text-slate-300">Predefined Half-Day Options</label>
+                                    {HALF_DAY_OPTIONS.map((option, index) => (
+                                        <label key={index} className="flex items-center p-3 bg-muted rounded border border-gray-600 hover:bg-gray-700/50 cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                name="timeSelectionMode"
+                                                checked={startTime === option.startTime && endTime === option.endTime}
+                                                onChange={() => {
+                                                    setStartTime(option.startTime);
+                                                    setEndTime(option.endTime);
+                                                }}
+                                                className="mr-3"
+                                            />
+                                            <span className="text-sm text-slate-200">{option.label}</span>
+                                        </label>
+                                    ))}
                                 </div>
+
+                                {/* Custom Time Range Option */}
+                                <div className="space-y-2">
+                                    <label className="block text-sm font-medium text-slate-300">Or Custom Time Range</label>
+                                    <label className="flex items-center p-3 bg-muted rounded border border-gray-600 hover:bg-gray-700/50 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="timeSelectionMode"
+                                            checked={!HALF_DAY_OPTIONS.some(option => startTime === option.startTime && endTime === option.endTime)}
+                                            onChange={() => {
+                                                setStartTime('');
+                                                setEndTime('');
+                                            }}
+                                            className="mr-3"
+                                        />
+                                        <span className="text-sm text-slate-200">Custom time range</span>
+                                    </label>
+                                </div>
+
+                                {/* Custom Time Inputs */}
+                                {startTime === '' && endTime === '' && (
+                                    <div className="mt-3 grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs text-slate-400 mb-1">From</label>
+                                            <input
+                                                type="time"
+                                                value={startTime}
+                                                onChange={(e) => setStartTime(e.target.value)}
+                                                min="08:00"
+                                                max="17:00"
+                                                step="60"
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-slate-400 mb-1">To</label>
+                                            <input
+                                                type="time"
+                                                value={endTime}
+                                                onChange={(e) => setEndTime(e.target.value)}
+                                                min="08:00"
+                                                max="17:00"
+                                                step="60"
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
                                 {totalHours > 0 && (
                                     <div className="mt-2 space-y-1">
                                         <div className="text-sm text-slate-300 bg-green-900/20 p-2 rounded">
@@ -489,14 +532,19 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                                         (Less than or equal to 90 minutes = no deduction)
                                                     </div>
                                                 )}
-                                                {totalMinutes > 90 && totalMinutes < 240 && (
+                                                {totalMinutes > 90 && totalMinutes <= 270 && (
                                                     <div className="text-xs text-slate-400 mt-1">
-                                                        (Greater than 90 minutes and less than 4 hours = half day)
+                                                        (Greater than 90 minutes and up to 4.5 hours = half day)
                                                     </div>
                                                 )}
-                                                {totalMinutes >= 240 && (
+                                                {totalMinutes > 270 && (
                                                     <div className="text-xs text-slate-400 mt-1">
-                                                        (4+ hours = full day)
+                                                        (More than 4.5 hours = full day)
+                                                    </div>
+                                                )}
+                                                {(totalMinutes === 270) && (
+                                                    <div className="text-xs text-blue-400 mt-1">
+                                                        (Standardized half-day timing: 08:00-12:30 or 12:30-17:00)
                                                     </div>
                                                 )}
                                             </div>

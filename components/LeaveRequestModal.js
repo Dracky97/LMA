@@ -18,6 +18,15 @@ export default function LeaveRequestModal({ userData, onClose }) {
     const [totalMinutes, setTotalMinutes] = useState(0);
     const [leaveUnits, setLeaveUnits] = useState(0);
     const [substituteFor, setSubstituteFor] = useState('');
+    const [holidays, setHolidays] = useState([]);
+
+    useEffect(() => {
+        const unsubscribe = onSnapshot(collection(db, 'holidays'), (snapshot) => {
+            const holidaysData = snapshot.docs.map(doc => doc.data().date);
+            setHolidays(holidaysData);
+        });
+        return () => unsubscribe();
+    }, []);
 
     // New state for granular date selection
     const [useGranularSelection, setUseGranularSelection] = useState(false);
@@ -79,11 +88,11 @@ export default function LeaveRequestModal({ userData, onClose }) {
                     const [endHour, endMin] = dayEndTime.split(':').map(Number);
                     const diffMinutes = (endHour * 60 + endMin) - (startHour * 60 + startMin);
 
-                    // Short leave is now defined as < 90 minutes.
+                    // Short leave is now defined as < 90 minutes and does not consume leave.
                     if (diffMinutes < 90) {
-                         totalUnits += 0.5; // consume half day for short leave
+                        totalUnits += 0;
                     } else {
-                         totalUnits += 0;
+                        totalUnits += 0.5; // consume half day for short leave
                     }
                 }
             } else {
@@ -175,6 +184,13 @@ export default function LeaveRequestModal({ userData, onClose }) {
             setError('Please select both start and end dates.');
             return;
         }
+
+        const dates = getDatesInRange(startDate, endDate);
+        const holidayInSelection = dates.some(date => holidays.includes(date));
+        if (holidayInSelection) {
+            setError('Your leave request includes a company holiday. Please select a different date range.');
+            return;
+        }
         
         if (new Date(endDate) < new Date(startDate)) {
             setError('End date must be after start date.');
@@ -203,20 +219,23 @@ export default function LeaveRequestModal({ userData, onClose }) {
             return;
         }
 
-        // Validate business hours (8am - 5pm)
+        // Validate business hours (8am - 5:30pm)
         if (startTime || endTime) {
-            const validateTime = (timeStr) => {
-                const [hour] = timeStr.split(':').map(Number);
-                return hour >= 8 && hour <= 17;
+            const validateTime = (timeStr, isEndTime = false) => {
+                const [hour, minute] = timeStr.split(':').map(Number);
+                if (isEndTime) {
+                    return hour > 17 || (hour === 17 && minute > 30);
+                }
+                return hour < 8;
             };
 
-            if (startTime && !validateTime(startTime)) {
-                setError('Start time must be between 8:00 AM and 5:00 PM.');
+            if (startTime && validateTime(startTime)) {
+                setError('Start time must be after 8:00 AM.');
                 return;
             }
 
-            if (endTime && !validateTime(endTime)) {
-                setError('End time must be between 8:00 AM and 5:00 PM.');
+            if (endTime && validateTime(endTime, true)) {
+                setError('End time must be before 5:30 PM.');
                 return;
             }
         }

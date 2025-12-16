@@ -35,9 +35,9 @@ export default function AdminDashboard() {
     const [success, setSuccess] = useState('');
     const [resetInProgress, setResetInProgress] = useState(false);
     const [resetMessage, setResetMessage] = useState('');
-    const [showPasswordDialog, setShowPasswordDialog] = useState(false);
-    const [adminPassword, setAdminPassword] = useState('');
-    const [passwordError, setPasswordError] = useState('');
+    const [showResetDialog, setShowResetDialog] = useState(false);
+    const [resetConfirmation, setResetConfirmation] = useState('');
+    const [resetError, setResetError] = useState('');
     const [editingUser, setEditingUser] = useState(null);
     const [showEditModal, setShowEditModal] = useState(false);
     const [editUserData, setEditUserData] = useState({});
@@ -562,24 +562,19 @@ export default function AdminDashboard() {
     };
 
     const handleResetAllLeaveBalances = () => {
-        setShowPasswordDialog(true);
-        setAdminPassword('');
-        setPasswordError('');
+        setShowResetDialog(true);
+        setResetConfirmation('');
+        setResetError('');
     };
 
-    const confirmResetWithPassword = async () => {
-        // Simple password validation (you can make this more sophisticated)
-        if (adminPassword !== 'admin123') {
-            setPasswordError('Incorrect password. Please try again.');
+    const confirmReset = async () => {
+        if (resetConfirmation !== 'RESET') {
+            setResetError('Please type RESET to confirm.');
             return;
         }
 
-        setShowPasswordDialog(false);
-        setPasswordError('');
-
-        if (!window.confirm('Are you sure you want to reset all users\' leave balances? This action cannot be undone.')) {
-            return;
-        }
+        setShowResetDialog(false);
+        setResetError('');
 
         setResetInProgress(true);
         setResetMessage('');
@@ -1006,18 +1001,18 @@ export default function AdminDashboard() {
                 </div>
             )}
 
-            {/* Password Confirmation Dialog */}
-            {showPasswordDialog && (
+            {/* Reset Confirmation Dialog */}
+            {showResetDialog && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                     <div className="bg-card rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col mx-2 sm:mx-4">
                         <div className="p-6 overflow-y-auto flex-1">
                             <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-lg font-medium text-slate-200">Confirm Admin Password</h3>
+                                <h3 className="text-lg font-medium text-slate-200">Confirm Reset</h3>
                                 <button
                                     onClick={() => {
-                                        setShowPasswordDialog(false);
-                                        setPasswordError('');
-                                        setAdminPassword('');
+                                        setShowResetDialog(false);
+                                        setResetError('');
+                                        setResetConfirmation('');
                                     }}
                                     className="text-slate-400 hover:text-slate-200"
                                 >
@@ -1028,24 +1023,24 @@ export default function AdminDashboard() {
                             </div>
                             
                             <p className="text-sm text-slate-300 mb-4">
-                                Please enter the admin password to confirm resetting all leave balances. This action cannot be undone.
+                                This action will reset all users' leave balances to their configured allocations. This cannot be undone. To confirm, please type "RESET" in the box below.
                             </p>
                             
-                            {passwordError && (
+                            {resetError && (
                                 <div className="mb-4 p-3 bg-red-900/30 text-red-300 rounded-md text-sm">
-                                    {passwordError}
+                                    {resetError}
                                 </div>
                             )}
                             
                             <div className="mb-6">
-                                <label className="block text-sm font-medium text-slate-300 mb-2">Admin Password</label>
+                                <label className="block text-sm font-medium text-slate-300 mb-2">Type "RESET" to confirm</label>
                                 <input
-                                    type="password"
-                                    value={adminPassword}
-                                    onChange={(e) => setAdminPassword(e.target.value)}
-                                    onKeyPress={(e) => e.key === 'Enter' && confirmResetWithPassword()}
+                                    type="text"
+                                    value={resetConfirmation}
+                                    onChange={(e) => setResetConfirmation(e.target.value)}
+                                    onKeyPress={(e) => e.key === 'Enter' && confirmReset()}
                                     className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 text-slate-200 bg-card"
-                                    placeholder="Enter admin password"
+                                    placeholder="RESET"
                                     autoFocus
                                 />
                             </div>
@@ -1054,9 +1049,9 @@ export default function AdminDashboard() {
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        setShowPasswordDialog(false);
-                                        setPasswordError('');
-                                        setAdminPassword('');
+                                        setShowResetDialog(false);
+                                        setResetError('');
+                                        setResetConfirmation('');
                                     }}
                                     className="px-4 py-2 border border-gray-600 text-slate-300 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 transition duration-150 ease-in-out"
                                 >
@@ -1064,7 +1059,7 @@ export default function AdminDashboard() {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={confirmResetWithPassword}
+                                    onClick={confirmReset}
                                     className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-150 ease-in-out"
                                 >
                                     Confirm Reset

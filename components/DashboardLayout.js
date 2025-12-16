@@ -10,6 +10,7 @@ export default function DashboardLayout({ children }) {
     const navLinks = [
         { name: 'Leave', href: '/dashboard' },
         { name: 'Attendance', href: '/attendance' },
+        { name: 'Holidays', href: '/holidays' },
         { name: 'My Profile', href: `/profile/${userData?.uid}` },
     ];
 

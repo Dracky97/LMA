@@ -18,7 +18,8 @@ export default function TeamRequestsPage() {
     useEffect(() => {
         if (!userData?.uid) return;
 
-        const usersUnsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
+        const usersQuery = query(collection(db, 'users'), where('managerId', '==', userData.uid));
+        const usersUnsubscribe = onSnapshot(usersQuery, (snapshot) => {
             const usersData = {};
             snapshot.forEach(doc => usersData[doc.id] = doc.data());
             setUsers(usersData);

@@ -390,6 +390,7 @@ export default function AdminDashboard() {
                 maternityLeave: user.leaveBalance?.maternityLeave ?? 0,
                 paternityLeave: user.leaveBalance?.paternityLeave ?? 0,
                 'leave in-lieu': user.leaveBalance?.['leave in-lieu'] ?? 0,
+                unpaidLeave: user.leaveBalance?.unpaidLeave ?? 0,
                 other: user.leaveBalance?.other ?? 0
             },
             leaveAllocations: {

@@ -134,18 +134,33 @@ export default function HRManagerDashboard() {
             }
 
             if (newStatus === 'Approved') {
-                // Final HR approval - deduct balance and complete the request
-                await updateDoc(requestRef, {
-                    hrManagerApproval: 'Approved',
-                    status: 'Approved',
-                    hrManagerActionBy: userData.name,
-                    hrApprovalDate: new Date().toISOString(),
-                    rejectionReason: ''
-                });
+                // Final HR approval - handle based on leave type
+                const isUnpaidLeave = request.type === 'Unpaid Leave';
 
-                // Deduct the leave balance (this can result in negative balance)
-                await deductLeaveBalance(request);
-                setMessage({ type: 'success', text: 'Leave request finally approved. Balance has been deducted.' });
+                if (isUnpaidLeave) {
+                    // Unpaid leave doesn't deduct from balances
+                    await updateDoc(requestRef, {
+                        hrManagerApproval: 'Approved',
+                        status: 'Approved',
+                        hrManagerActionBy: userData.name,
+                        hrApprovalDate: new Date().toISOString(),
+                        rejectionReason: ''
+                    });
+                    setMessage({ type: 'success', text: 'Unpaid leave request approved successfully. No balance deduction required.' });
+                } else {
+                    // Regular paid leave - deduct balance and complete the request
+                    await updateDoc(requestRef, {
+                        hrManagerApproval: 'Approved',
+                        status: 'Approved',
+                        hrManagerActionBy: userData.name,
+                        hrApprovalDate: new Date().toISOString(),
+                        rejectionReason: ''
+                    });
+
+                    // Deduct the leave balance (this can result in negative balance)
+                    await deductLeaveBalance(request);
+                    setMessage({ type: 'success', text: 'Leave request finally approved. Balance has been deducted.' });
+                }
             } else {
                 // HR rejection
                 await updateDoc(requestRef, {
@@ -179,13 +194,6 @@ export default function HRManagerDashboard() {
                 currentData.leaveBalance = {};
             }
 
-            // Initialize missing leave type if needed
-            if (!currentData.leaveBalance.hasOwnProperty(leaveType)) {
-                currentData.leaveBalance[leaveType] = 0;
-            }
-
-            const currentBalance = currentData.leaveBalance[leaveType];
-
             // Use leaveUnits if available, otherwise calculate from dates
             const duration = request.leaveUnits !== undefined && request.leaveUnits > 0
                 ? request.leaveUnits
@@ -193,21 +201,54 @@ export default function HRManagerDashboard() {
 
             // For 'leave in-lieu' and 'other', there is no total allocation; approved requests should accumulate (add up)
             const isAccruingType = (leaveType === 'leave in-lieu' || leaveType === 'other');
-            const newBalance = isAccruingType ? currentBalance + duration : currentBalance - duration;
+
+            // Handle cross-utilization for Annual and Casual leave
+            const updatedLeaveBalance = { ...currentData.leaveBalance };
+            
+            if (leaveType === 'annualLeave' || leaveType === 'casualLeave') {
+                const primaryType = leaveType;
+                const fallbackType = leaveType === 'annualLeave' ? 'casualLeave' : 'annualLeave';
+                
+                // Initialize balances if they don't exist
+                if (!updatedLeaveBalance[primaryType]) updatedLeaveBalance[primaryType] = 0;
+                if (!updatedLeaveBalance[fallbackType]) updatedLeaveBalance[fallbackType] = 0;
+                
+                const primaryBalance = updatedLeaveBalance[primaryType];
+                const fallbackBalance = updatedLeaveBalance[fallbackType];
+                
+                if (primaryBalance >= duration) {
+                    // Sufficient balance in primary leave type
+                    updatedLeaveBalance[primaryType] = primaryBalance - duration;
+                } else if (primaryBalance + fallbackBalance >= duration) {
+                    // Cross-utilization needed
+                    const remaining = duration - primaryBalance;
+                    updatedLeaveBalance[primaryType] = 0;
+                    updatedLeaveBalance[fallbackType] = fallbackBalance - remaining;
+                    
+                    // Log the cross-utilization for tracking
+                    console.log(`Cross-utilization applied: ${remaining} days from ${fallbackType} to supplement ${primaryType}`);
+                } else {
+                    // Insufficient total balance - will go negative
+                    updatedLeaveBalance[primaryType] = primaryBalance - duration;
+                }
+            } else {
+                // Handle accruing types and other leave types
+                const currentBalance = updatedLeaveBalance[leaveType] || 0;
+                const newBalance = isAccruingType ? currentBalance + duration : currentBalance - duration;
+                updatedLeaveBalance[leaveType] = newBalance;
+            }
 
             console.log('HR Manager final approval - updating leave:', {
                 leaveType,
                 duration,
-                currentBalance,
-                newBalance,
                 isAccruingType,
-                isPartialDay: request.isPartialDay
+                isPartialDay: request.isPartialDay,
+                updatedLeaveBalance
             });
 
             // Check if any leave balance is going negative and update noPay status
             // Skip noPay status updates for manual entries (administrative adjustments)
             const isManualEntry = request.isManualEntry || false;
-            const updatedLeaveBalance = { ...currentData.leaveBalance, [leaveType]: newBalance };
             const hasNegativeBalance = Object.values(updatedLeaveBalance).some(balance => balance < 0);
             const currentlyOnNoPay = currentData.noPayStatus || false;
 
@@ -216,27 +257,27 @@ export default function HRManagerDashboard() {
                 if (hasNegativeBalance && !currentlyOnNoPay) {
                     // Starting no pay period
                     await updateDoc(userRef, {
-                        [`leaveBalance.${leaveType}`]: newBalance,
+                        leaveBalance: updatedLeaveBalance,
                         noPayStatus: true,
                         noPayStartDate: new Date().toISOString()
                     });
                 } else if (!hasNegativeBalance && currentlyOnNoPay) {
                     // Ending no pay period
                     await updateDoc(userRef, {
-                        [`leaveBalance.${leaveType}`]: newBalance,
+                        leaveBalance: updatedLeaveBalance,
                         noPayStatus: false,
                         noPayEndDate: new Date().toISOString()
                     });
                 } else {
                     // No status change needed
                     await updateDoc(userRef, {
-                        [`leaveBalance.${leaveType}`]: newBalance
+                        leaveBalance: updatedLeaveBalance
                     });
                 }
             } else {
                 // Manual entry - just update balance without noPay status changes
                 await updateDoc(userRef, {
-                    [`leaveBalance.${leaveType}`]: newBalance
+                    leaveBalance: updatedLeaveBalance
                 });
             }
         } catch (error) {
@@ -884,6 +925,7 @@ const selectedUser = users[employeeId];
                 maternityLeave: editBalanceData.maternityLeave || 0,
                 paternityLeave: editBalanceData.paternityLeave || 0,
                 'leave in-lieu': editBalanceData['leave in-lieu'] || 0,
+                unpaidLeave: editBalanceData.unpaidLeave || 0,
                 other: editBalanceData.other || 0
             };
 
@@ -1055,6 +1097,7 @@ const selectedUser = users[employeeId];
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Maternity Leave</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Paternity Leave</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Leave in-lieu</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Unpaid Leave</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Other</th>
                                     </tr>
                                 </thead>
@@ -1091,6 +1134,7 @@ const selectedUser = users[employeeId];
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.maternityLeave)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.paternityLeave)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.['leave in-lieu'])}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.unpaidLeave || 0)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatLeaveBalance(user.leaveBalance?.other)}</td>
                                         </tr>
                                     ))}
@@ -1629,6 +1673,16 @@ const selectedUser = users[employeeId];
                                             />
                                         </div>
 
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-300 mb-1">Unpaid Leave</label>
+                                            <input
+                                                type="number"
+                                                step="0.5"
+                                                value={editBalanceData.unpaidLeave || 0}
+                                                onChange={(e) => handleBalanceChange('unpaidLeave', e.target.value)}
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
 
                                         <div>
                                             <label className="block text-sm font-medium text-slate-300 mb-1">Other Leave</label>

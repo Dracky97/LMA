@@ -56,29 +56,45 @@ export default function DepartmentManagerDashboard() {
                 throw new Error('Request not found');
             }
 
-            // Check if this approval would result in negative balance
-            const wouldGoNegative = await checkIfRequestWouldGoNegative(request);
+            // Unpaid leave always requires HR approval, regardless of balance status
+            const isUnpaidLeave = request.type === 'Unpaid Leave';
 
-            if (newStatus === 'Approved' && wouldGoNegative) {
-                // Request would go negative - escalate to HR for approval
-                await updateDoc(requestRef, {
-                    status: 'Pending HR Approval',
-                    approvedBy: userData.name,
-                    managerApprovalDate: new Date().toISOString(),
-                    rejectionReason: ''
-                });
-                setMessage({ type: 'success', text: 'Request escalated to HR for final approval due to insufficient leave balance.' });
-            } else if (newStatus === 'Approved' && !wouldGoNegative) {
-                // Regular approval - deduct balance immediately
-                await updateDoc(requestRef, {
-                    status: 'Approved',
-                    approvedBy: userData.name,
-                    approvalDate: new Date().toISOString(),
-                    rejectionReason: ''
-                });
+            if (newStatus === 'Approved') {
+                if (isUnpaidLeave) {
+                    // Unpaid leave always escalates to HR for final approval
+                    await updateDoc(requestRef, {
+                        status: 'Pending HR Approval',
+                        approvedBy: userData.name,
+                        managerApprovalDate: new Date().toISOString(),
+                        rejectionReason: ''
+                    });
+                    setMessage({ type: 'success', text: 'Unpaid leave request escalated to HR for final approval.' });
+                } else {
+                    // Check if this approval would result in negative balance for paid leave types
+                    const wouldGoNegative = await checkIfRequestWouldGoNegative(request);
 
-                await deductLeaveBalance(request);
-                setMessage({ type: 'success', text: 'Leave request approved successfully.' });
+                    if (wouldGoNegative) {
+                        // Request would go negative - escalate to HR for approval
+                        await updateDoc(requestRef, {
+                            status: 'Pending HR Approval',
+                            approvedBy: userData.name,
+                            managerApprovalDate: new Date().toISOString(),
+                            rejectionReason: ''
+                        });
+                        setMessage({ type: 'success', text: 'Request escalated to HR for final approval due to insufficient leave balance.' });
+                    } else {
+                        // Regular approval - deduct balance immediately
+                        await updateDoc(requestRef, {
+                            status: 'Approved',
+                            approvedBy: userData.name,
+                            approvalDate: new Date().toISOString(),
+                            rejectionReason: ''
+                        });
+
+                        await deductLeaveBalance(request);
+                        setMessage({ type: 'success', text: 'Leave request approved successfully.' });
+                    }
+                }
             } else {
                 // Rejection or other status changes
                 await updateDoc(requestRef, {
@@ -141,22 +157,49 @@ export default function DepartmentManagerDashboard() {
                 currentData.leaveBalance = {};
             }
 
-            // Initialize missing leave type if needed
-            if (!currentData.leaveBalance.hasOwnProperty(leaveType)) {
-                currentData.leaveBalance[leaveType] = 0;
-            }
-
-            const currentBalance = currentData.leaveBalance[leaveType];
-
             // Use leaveUnits if available, otherwise calculate from dates
             const duration = request.leaveUnits !== undefined && request.leaveUnits > 0
                 ? request.leaveUnits
                 : Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
 
-            const newBalance = currentBalance - duration;
+            // Handle cross-utilization for Annual and Casual leave
+            const updatedLeaveBalance = { ...currentData.leaveBalance };
+            
+            if (leaveType === 'annualLeave' || leaveType === 'casualLeave') {
+                const primaryType = leaveType;
+                const fallbackType = leaveType === 'annualLeave' ? 'casualLeave' : 'annualLeave';
+                
+                // Initialize balances if they don't exist
+                if (!updatedLeaveBalance[primaryType]) updatedLeaveBalance[primaryType] = 0;
+                if (!updatedLeaveBalance[fallbackType]) updatedLeaveBalance[fallbackType] = 0;
+                
+                const primaryBalance = updatedLeaveBalance[primaryType];
+                const fallbackBalance = updatedLeaveBalance[fallbackType];
+                
+                if (primaryBalance >= duration) {
+                    // Sufficient balance in primary leave type
+                    updatedLeaveBalance[primaryType] = primaryBalance - duration;
+                } else if (primaryBalance + fallbackBalance >= duration) {
+                    // Cross-utilization needed
+                    const remaining = duration - primaryBalance;
+                    updatedLeaveBalance[primaryType] = 0;
+                    updatedLeaveBalance[fallbackType] = fallbackBalance - remaining;
+                    
+                    // Log the cross-utilization for tracking
+                    console.log(`Cross-utilization applied: ${remaining} days from ${fallbackType} to supplement ${primaryType}`);
+                } else {
+                    // Insufficient total balance - will go negative
+                    updatedLeaveBalance[primaryType] = primaryBalance - duration;
+                }
+            } else {
+                // Initialize leave type if needed
+                if (!updatedLeaveBalance[leaveType]) {
+                    updatedLeaveBalance[leaveType] = 0;
+                }
+                updatedLeaveBalance[leaveType] = updatedLeaveBalance[leaveType] - duration;
+            }
 
             // Check if any leave balance is going negative and update noPay status
-            const updatedLeaveBalance = { ...currentData.leaveBalance, [leaveType]: newBalance };
             const hasNegativeBalance = Object.values(updatedLeaveBalance).some(balance => balance < 0);
             const currentlyOnNoPay = currentData.noPayStatus || false;
 
@@ -164,21 +207,21 @@ export default function DepartmentManagerDashboard() {
             if (hasNegativeBalance && !currentlyOnNoPay) {
                 // Starting no pay period
                 await updateDoc(userRef, {
-                    [`leaveBalance.${leaveType}`]: newBalance,
+                    leaveBalance: updatedLeaveBalance,
                     noPayStatus: true,
                     noPayStartDate: new Date().toISOString()
                 });
             } else if (!hasNegativeBalance && currentlyOnNoPay) {
                 // Ending no pay period
                 await updateDoc(userRef, {
-                    [`leaveBalance.${leaveType}`]: newBalance,
+                    leaveBalance: updatedLeaveBalance,
                     noPayStatus: false,
                     noPayEndDate: new Date().toISOString()
                 });
             } else {
                 // No status change needed
                 await updateDoc(userRef, {
-                    [`leaveBalance.${leaveType}`]: newBalance
+                    leaveBalance: updatedLeaveBalance
                 });
             }
         } catch (error) {

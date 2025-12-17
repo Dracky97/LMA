@@ -23,15 +23,140 @@ export default function LeaveRequestModal({ userData, onClose }) {
     const [useGranularSelection, setUseGranularSelection] = useState(false);
     const [dateConfigurations, setDateConfigurations] = useState({});
 
+    // State for medical documentation requirement
+    const [medicalDocumentRequired, setMedicalDocumentRequired] = useState(false);
+    const [medicalDocumentProvided, setMedicalDocumentProvided] = useState(false);
+
     // Predefined half-day options
     const HALF_DAY_OPTIONS = [
-        { label: 'Morning Half-Day (08:00 AM - 12:30 PM)', startTime: '08:00', endTime: '12:30', duration: 270 },
+        { label: 'Morning Half-Day (08:30 AM - 12:30 PM)', startTime: '08:30', endTime: '12:30', duration: 270 },
         { label: 'Afternoon Half-Day (12:30 PM - 05:00 PM)', startTime: '12:30', endTime: '17:00', duration: 270 },
-        { label: 'Full Day (08:00 AM - 05:00 PM)', startTime: '08:00', endTime: '17:00', duration: 540 }
+        { label: 'Full Day (08:30 AM - 05:00 PM)', startTime: '08:30', endTime: '17:00', duration: 540 }
     ];
 
     // Filter leave types based on user's gender using shared configuration
     const filteredLeaveTypes = getFilteredLeaveTypes(userData.gender);
+
+    // Get user's leave balances
+    const leaveBalances = userData.leaveBalance || {};
+
+    // Helper function to check if user has sufficient leave balance
+    const hasSufficientBalance = (leaveType, requiredDays) => {
+        const balance = leaveBalances[leaveType] || 0;
+        return balance >= requiredDays;
+    };
+
+    // Helper function to get total available days for a leave type (including cross-utilization)
+    const getTotalAvailableDays = (primaryType, fallbackType, requiredDays) => {
+        const primaryBalance = leaveBalances[primaryType] || 0;
+        const fallbackBalance = leaveBalances[fallbackType] || 0;
+        
+        if (primaryBalance >= requiredDays) {
+            return { sufficient: true, primaryBalance, fallbackBalance: 0, crossUtilized: false };
+        } else if (primaryBalance + fallbackBalance >= requiredDays) {
+            const crossUtilized = requiredDays - primaryBalance;
+            return {
+                sufficient: true,
+                primaryBalance: 0,
+                fallbackBalance: fallbackBalance - crossUtilized,
+                crossUtilized,
+                crossUtilizationType: fallbackType
+            };
+        } else {
+            return {
+                sufficient: false,
+                primaryBalance,
+                fallbackBalance,
+                totalAvailable: primaryBalance + fallbackBalance,
+                crossUtilized: 0
+            };
+        }
+    };
+
+    // Helper function to check sick leave balance and suggest unpaid leave
+    const checkSickLeaveAvailability = (requiredDays) => {
+        const sickBalance = leaveBalances['sickLeave'] || 0;
+        if (sickBalance >= requiredDays) {
+            return { canUse: true, suggestedType: 'Sick Leave', balance: sickBalance };
+        } else if (sickBalance > 0) {
+            return {
+                canUse: true,
+                suggestedType: 'Unpaid Leave',
+                balance: sickBalance,
+                message: `You have ${sickBalance} sick leave days remaining. The remaining ${requiredDays - sickBalance} days will be unpaid.`
+            };
+        } else {
+            return {
+                canUse: false,
+                suggestedType: 'Unpaid Leave',
+                balance: 0,
+                message: 'No sick leave balance available. Please apply for Unpaid Leave.'
+            };
+        }
+    };
+
+    // Handle leave type change with balance checking
+    const handleTypeChange = (newType) => {
+        setType(newType);
+        
+        // Clear any previous error messages
+        setError('');
+        
+        // Reset medical document requirement
+        setMedicalDocumentRequired(false);
+        setMedicalDocumentProvided(false);
+        
+        // Check balance availability and show appropriate messages
+        if ((newType === 'Annual Leave' || newType === 'Casual Leave') && (totalDays > 0 || leaveUnits > 0)) {
+            const requiredDays = leaveUnits > 0 ? leaveUnits : totalDays;
+            const primaryType = newType === 'Annual Leave' ? 'annualLeave' : 'casualLeave';
+            const fallbackType = newType === 'Annual Leave' ? 'casualLeave' : 'annualLeave';
+            
+            const availability = getTotalAvailableDays(primaryType, fallbackType, requiredDays);
+            
+            if (!availability.sufficient) {
+                if (availability.totalAvailable > 0) {
+                    setError(`Insufficient leave balance. You have ${availability.totalAvailable} days total available between ${newType} and ${fallbackType === 'annualLeave' ? 'Annual Leave' : 'Casual Leave'}. Please apply for Unpaid Leave for the remaining days.`);
+                } else {
+                    setError(`No ${newType} balance available. Please apply for Unpaid Leave.`);
+                }
+            } else if (availability.crossUtilized > 0) {
+                // Show info message about cross-utilization
+                setError(`Note: ${availability.crossUtilized} days will be deducted from your ${availability.crossUtilizationType === 'annualLeave' ? 'Annual Leave' : 'Casual Leave'} balance as your ${newType} balance is insufficient.`);
+                setTimeout(() => setError(''), 5000); // Clear after 5 seconds
+            }
+        } else if (newType === 'Sick Leave' && (totalDays > 0 || leaveUnits > 0)) {
+            const requiredDays = leaveUnits > 0 ? leaveUnits : totalDays;
+            const sickCheck = checkSickLeaveAvailability(requiredDays);
+            
+            if (!sickCheck.canUse) {
+                setError(sickCheck.message);
+            } else if (sickCheck.message) {
+                setError(sickCheck.message);
+                setTimeout(() => setError(''), 5000); // Clear after 5 seconds
+            }
+            
+            // Check for medical document requirement (> 2 days)
+            if (requiredDays > 2) {
+                setMedicalDocumentRequired(true);
+                const medicalMsg = `⚠️ Medical Documentation Required: For sick leave exceeding 2 days, you must submit a supporting medical document from a registered medical practitioner.`;
+                setError(medicalMsg);
+                setTimeout(() => setError(''), 8000); // Clear after 8 seconds for medical requirement
+            }
+        } else if (newType === 'Unpaid Leave') {
+            // For unpaid leave, check if user has any other balances that could be used
+            const annualBalance = leaveBalances['annualLeave'] || 0;
+            const casualBalance = leaveBalances['casualLeave'] || 0;
+            const sickBalance = leaveBalances['sickLeave'] || 0;
+            const totalOtherBalances = annualBalance + casualBalance + sickBalance;
+            
+            if (totalOtherBalances > 0) {
+                const infoMsg = `Note: You have remaining balances - Annual: ${annualBalance} days, Casual: ${casualBalance} days, Sick: ${sickBalance} days. Unpaid Leave will not deduct from these balances.`;
+                setError(infoMsg);
+                setTimeout(() => setError(''), 5000); // Clear after 5 seconds
+            }
+        }
+    };
 
     // Generate array of dates between start and end date
     const getDatesInRange = (start, end) => {
@@ -204,6 +329,21 @@ export default function LeaveRequestModal({ userData, onClose }) {
             return;
         }
 
+        // Validate medical document requirement for sick leave > 2 days
+        if (type === 'Sick Leave' && medicalDocumentRequired) {
+            const requiredDays = leaveUnits > 0 ? leaveUnits : totalDays;
+            if (requiredDays > 2) {
+                if (!medicalDocumentProvided) {
+                    setError('You must acknowledge that you will provide the required medical documentation for sick leave exceeding 2 days.');
+                    return;
+                }
+                if (!reason.trim()) {
+                    setError('Please provide a detailed reason for your sick leave and mention that medical certificate will be attached.');
+                    return;
+                }
+            }
+        }
+
         // Validate business hours (8am - 5pm)
         if (startTime || endTime) {
             const validateTime = (timeStr) => {
@@ -253,6 +393,8 @@ export default function LeaveRequestModal({ userData, onClose }) {
                 totalDays: totalDays,
                 leaveUnits: finalLeaveUnits,
                 isGranularSelection: useGranularSelection,
+                medicalDocumentRequired: medicalDocumentRequired,
+                medicalDocumentProvided: medicalDocumentProvided,
                 ...(type === 'Leave in-lieu' && { substituteFor: substituteFor.trim() }),
             };
 
@@ -291,13 +433,48 @@ export default function LeaveRequestModal({ userData, onClose }) {
                             <label className="block text-sm font-medium text-slate-300 mb-1">Leave Type</label>
                             <select
                                 value={type}
-                                onChange={(e) => setType(e.target.value)}
+                                onChange={(e) => handleTypeChange(e.target.value)}
                                 className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
                             >
                                 {filteredLeaveTypes.map((leaveType, index) => (
                                     <option key={index} value={leaveType.value}>{leaveType.label}</option>
                                 ))}
                             </select>
+                        </div>
+
+                        {/* Leave Balance Summary */}
+                        <div className="mb-4 p-3 bg-muted rounded-lg border border-gray-600">
+                            <h4 className="text-sm font-medium text-slate-300 mb-2">Your Leave Balances</h4>
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div className="flex justify-between">
+                                    <span className="text-slate-400">Annual Leave:</span>
+                                    <span className="text-slate-200 font-medium">{leaveBalances.annualLeave || 0} days</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-slate-400">Casual Leave:</span>
+                                    <span className="text-slate-200 font-medium">{leaveBalances.casualLeave || 0} days</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-slate-400">Sick Leave:</span>
+                                    <span className="text-slate-200 font-medium">{leaveBalances.sickLeave || 0} days</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-slate-400">Short Leave:</span>
+                                    <span className="text-slate-200 font-medium">{leaveBalances.shortLeave || 0} days</span>
+                                </div>
+                                {userData.gender === 'female' && (
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-400">Maternity Leave:</span>
+                                        <span className="text-slate-200 font-medium">{leaveBalances.maternityLeave || 0} days</span>
+                                    </div>
+                                )}
+                                {userData.gender === 'male' && (
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-400">Paternity Leave:</span>
+                                        <span className="text-slate-200 font-medium">{leaveBalances.paternityLeave || 0} days</span>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         {/* Date Selection Mode Toggle */}
@@ -598,15 +775,46 @@ export default function LeaveRequestModal({ userData, onClose }) {
 
                         {/* Reason */}
                         <div className="mb-6">
-                            <label className="block text-sm font-medium text-slate-300 mb-1">Reason (Optional)</label>
+                            <label className="block text-sm font-medium text-slate-300 mb-1">Reason {type === 'Sick Leave' && medicalDocumentRequired ? <span className="text-red-400">*</span> : '(Optional)'}</label>
                             <textarea
                                 value={reason}
                                 onChange={(e) => setReason(e.target.value)}
                                 className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
                                 rows="3"
-                                placeholder="Enter reason for leave (optional)"
+                                placeholder={type === 'Sick Leave' && medicalDocumentRequired ? "Please provide detailed reason for sick leave and mention that medical certificate will be attached" : "Enter reason for leave (optional)"}
                             ></textarea>
                         </div>
+
+                        {/* Medical Document Requirement Notice */}
+                        {medicalDocumentRequired && (
+                            <div className="mb-6 p-4 bg-red-900/30 border border-red-500/50 rounded-lg">
+                                <div className="flex items-start space-x-3">
+                                    <svg className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                                    </svg>
+                                    <div>
+                                        <h4 className="text-sm font-medium text-red-300 mb-1">Medical Documentation Required</h4>
+                                        <p className="text-sm text-red-200">
+                                            For sick leave requests exceeding 2 days, you must provide a supporting medical document from a registered medical practitioner.
+                                            Please ensure to attach or submit your medical certificate during or immediately after your leave period.
+                                        </p>
+                                        <div className="mt-2">
+                                            <label className="flex items-center">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={medicalDocumentProvided}
+                                                    onChange={(e) => setMedicalDocumentProvided(e.target.checked)}
+                                                    className="mr-2 rounded border-gray-600 bg-card text-red-400 focus:ring-red-500"
+                                                />
+                                                <span className="text-sm text-red-200">
+                                                    I acknowledge that I will provide the required medical documentation
+                                                </span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Action Buttons */}
                         <div className="flex justify-end space-x-3">

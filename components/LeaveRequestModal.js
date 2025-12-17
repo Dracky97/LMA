@@ -23,9 +23,8 @@ export default function LeaveRequestModal({ userData, onClose }) {
     const [useGranularSelection, setUseGranularSelection] = useState(false);
     const [dateConfigurations, setDateConfigurations] = useState({});
 
-    // State for medical documentation requirement
+    // State for medical documentation reminder
     const [medicalDocumentRequired, setMedicalDocumentRequired] = useState(false);
-    const [medicalDocumentProvided, setMedicalDocumentProvided] = useState(false);
 
     // Predefined half-day options
     const HALF_DAY_OPTIONS = [
@@ -76,18 +75,28 @@ export default function LeaveRequestModal({ userData, onClose }) {
     // Helper function to check sick leave balance and suggest unpaid leave
     const checkSickLeaveAvailability = (requiredDays) => {
         const sickBalance = leaveBalances['sickLeave'] || 0;
+        
         if (sickBalance >= requiredDays) {
-            return { canUse: true, suggestedType: 'Sick Leave', balance: sickBalance };
+            return {
+                canUse: true,
+                canFullyCover: true,
+                suggestedType: 'Sick Leave',
+                balance: sickBalance,
+                message: `You have sufficient sick leave balance (${sickBalance} days) for this request.`
+            };
         } else if (sickBalance > 0) {
             return {
                 canUse: true,
-                suggestedType: 'Unpaid Leave',
+                canFullyCover: false,
+                suggestedType: 'Sick Leave', // Still suggest Sick Leave as primary, but with partial coverage
                 balance: sickBalance,
-                message: `You have ${sickBalance} sick leave days remaining. The remaining ${requiredDays - sickBalance} days will be unpaid.`
+                unpaidDays: requiredDays - sickBalance,
+                message: `You have ${sickBalance} sick leave days remaining, but need ${requiredDays} days total. Consider applying for Sick Leave (${sickBalance} days) + Unpaid Leave (${requiredDays - sickBalance} days), or full Unpaid Leave.`
             };
         } else {
             return {
                 canUse: false,
+                canFullyCover: false,
                 suggestedType: 'Unpaid Leave',
                 balance: 0,
                 message: 'No sick leave balance available. Please apply for Unpaid Leave.'
@@ -104,7 +113,6 @@ export default function LeaveRequestModal({ userData, onClose }) {
         
         // Reset medical document requirement
         setMedicalDocumentRequired(false);
-        setMedicalDocumentProvided(false);
         
         // Check balance availability and show appropriate messages
         if ((newType === 'Annual Leave' || newType === 'Casual Leave') && (totalDays > 0 || leaveUnits > 0)) {
@@ -123,7 +131,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
             } else if (availability.crossUtilized > 0) {
                 // Show info message about cross-utilization
                 setError(`Note: ${availability.crossUtilized} days will be deducted from your ${availability.crossUtilizationType === 'annualLeave' ? 'Annual Leave' : 'Casual Leave'} balance as your ${newType} balance is insufficient.`);
-                setTimeout(() => setError(''), 5000); // Clear after 5 seconds
+                setTimeout(() => setError(''), 10000); // Clear after 10 seconds
             }
         } else if (newType === 'Sick Leave' && (totalDays > 0 || leaveUnits > 0)) {
             const requiredDays = leaveUnits > 0 ? leaveUnits : totalDays;
@@ -131,17 +139,15 @@ export default function LeaveRequestModal({ userData, onClose }) {
             
             if (!sickCheck.canUse) {
                 setError(sickCheck.message);
-            } else if (sickCheck.message) {
+            } else if (!sickCheck.canFullyCover) {
+                // Show informational message about partial coverage
                 setError(sickCheck.message);
-                setTimeout(() => setError(''), 5000); // Clear after 5 seconds
+                setTimeout(() => setError(''), 10000); // Clear after 10 seconds for longer messages
             }
             
             // Check for medical document requirement (> 2 days)
             if (requiredDays > 2) {
                 setMedicalDocumentRequired(true);
-                const medicalMsg = `⚠️ Medical Documentation Required: For sick leave exceeding 2 days, you must submit a supporting medical document from a registered medical practitioner.`;
-                setError(medicalMsg);
-                setTimeout(() => setError(''), 8000); // Clear after 8 seconds for medical requirement
             }
         } else if (newType === 'Unpaid Leave') {
             // For unpaid leave, check if user has any other balances that could be used
@@ -153,7 +159,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
             if (totalOtherBalances > 0) {
                 const infoMsg = `Note: You have remaining balances - Annual: ${annualBalance} days, Casual: ${casualBalance} days, Sick: ${sickBalance} days. Unpaid Leave will not deduct from these balances.`;
                 setError(infoMsg);
-                setTimeout(() => setError(''), 5000); // Clear after 5 seconds
+                setTimeout(() => setError(''), 10000); // Clear after 10 seconds
             }
         }
     };
@@ -329,16 +335,12 @@ export default function LeaveRequestModal({ userData, onClose }) {
             return;
         }
 
-        // Validate medical document requirement for sick leave > 2 days
+        // Validate reason for sick leave > 2 days
         if (type === 'Sick Leave' && medicalDocumentRequired) {
             const requiredDays = leaveUnits > 0 ? leaveUnits : totalDays;
             if (requiredDays > 2) {
-                if (!medicalDocumentProvided) {
-                    setError('You must acknowledge that you will provide the required medical documentation for sick leave exceeding 2 days.');
-                    return;
-                }
                 if (!reason.trim()) {
-                    setError('Please provide a detailed reason for your sick leave and mention that medical certificate will be attached.');
+                    setError('Please provide a detailed reason for your sick leave.');
                     return;
                 }
             }
@@ -394,7 +396,6 @@ export default function LeaveRequestModal({ userData, onClose }) {
                 leaveUnits: finalLeaveUnits,
                 isGranularSelection: useGranularSelection,
                 medicalDocumentRequired: medicalDocumentRequired,
-                medicalDocumentProvided: medicalDocumentProvided,
                 ...(type === 'Leave in-lieu' && { substituteFor: substituteFor.trim() }),
             };
 
@@ -624,8 +625,8 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                 </div>
 
                                 <div className="text-xs text-slate-400 mb-3">
-                                    Business hours: 8:00 AM - 5:00 PM only<br/>
-                                    Half-day timing should be either 08:00 AM - 12:30 PM or 12:30 PM - 05:00 PM
+                                    Business hours: 8:30 AM - 5:00 PM only<br/>
+                                    Half-day timing should be either 08:30 AM - 12:30 PM or 12:30 PM - 05:00 PM
                                 </div>
 
                                 {/* Predefined Half-Day Options */}
@@ -781,36 +782,22 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                 onChange={(e) => setReason(e.target.value)}
                                 className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
                                 rows="3"
-                                placeholder={type === 'Sick Leave' && medicalDocumentRequired ? "Please provide detailed reason for sick leave and mention that medical certificate will be attached" : "Enter reason for leave (optional)"}
+                                placeholder={type === 'Sick Leave' && medicalDocumentRequired ? "Please provide detailed reason for sick leave" : "Enter reason for leave (optional)"}
                             ></textarea>
                         </div>
 
-                        {/* Medical Document Requirement Notice */}
+                        {/* Medical Document Reminder */}
                         {medicalDocumentRequired && (
-                            <div className="mb-6 p-4 bg-red-900/30 border border-red-500/50 rounded-lg">
+                            <div className="mb-6 p-4 bg-blue-900/30 border border-blue-500/50 rounded-lg">
                                 <div className="flex items-start space-x-3">
-                                    <svg className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                                    <svg className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                     </svg>
                                     <div>
-                                        <h4 className="text-sm font-medium text-red-300 mb-1">Medical Documentation Required</h4>
-                                        <p className="text-sm text-red-200">
-                                            For sick leave requests exceeding 2 days, you must provide a supporting medical document from a registered medical practitioner.
-                                            Please ensure to attach or submit your medical certificate during or immediately after your leave period.
+                                        <h4 className="text-sm font-medium text-blue-300 mb-1">Reminder: Medical Documentation</h4>
+                                        <p className="text-sm text-blue-200">
+                                            For sick leave exceeding 2 days, please send your Medical Documentation to HR via Email.
                                         </p>
-                                        <div className="mt-2">
-                                            <label className="flex items-center">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={medicalDocumentProvided}
-                                                    onChange={(e) => setMedicalDocumentProvided(e.target.checked)}
-                                                    className="mr-2 rounded border-gray-600 bg-card text-red-400 focus:ring-red-500"
-                                                />
-                                                <span className="text-sm text-red-200">
-                                                    I acknowledge that I will provide the required medical documentation
-                                                </span>
-                                            </label>
-                                        </div>
                                     </div>
                                 </div>
                             </div>

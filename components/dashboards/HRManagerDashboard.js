@@ -7,7 +7,9 @@ import ManagerRequestsTable from '../ManagerRequestsTable';
 import LeaveHistoryTable from '../LeaveHistoryTable';
 import LeaveRequestModal from '../LeaveRequestModal';
 import MyLeaveSection from '../MyLeaveSection';
+import LeavePolicyInfo, { LeavePolicyReference } from '../LeavePolicyInfo';
 import { LEAVE_TYPE_MAP, validateLeaveType, LEAVE_TYPES } from '../../lib/leaveTypes';
+import { calculateLeaveBalances, LEAVE_CONFIG } from '../../lib/leavePolicy';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -36,6 +38,9 @@ export default function HRManagerDashboard() {
     const [customReportStartDate, setCustomReportStartDate] = useState('');
     const [customReportEndDate, setCustomReportEndDate] = useState('');
     const [isResettingShortLeave, setIsResettingShortLeave] = useState(false);
+    const [editingJoinedDate, setEditingJoinedDate] = useState(null);
+    const [newJoinedDate, setNewJoinedDate] = useState('');
+    const [isCalculatingBalances, setIsCalculatingBalances] = useState(false);
 
     useEffect(() => {
         const usersUnsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
@@ -510,6 +515,90 @@ const selectedUser = users[employeeId];
             setIsResettingShortLeave(false);
         }
     };
+    
+    const calculateAllLeaveBalances = async () => {
+        try {
+            setIsCalculatingBalances(true);
+            setMessage(null);
+
+            const confirmMsg = `This will calculate and update leave balances for ALL employees based on the new policy. This action cannot be undone. Continue?`;
+            if (typeof window !== 'undefined' && !window.confirm(confirmMsg)) {
+                return;
+            }
+
+            let successCount = 0;
+            let errorCount = 0;
+            const errors = [];
+
+            // Process each employee
+            for (const user of Object.values(users)) {
+                try {
+                    if (!user.joinedDate) {
+                        errors.push(`${user.name}: No join date set`);
+                        errorCount++;
+                        continue;
+                    }
+
+                    // Get user's leave requests for current year
+                    const userRequests = allRequests.filter(request => 
+                        request.userId === user.uid && 
+                        new Date(request.startDate).getFullYear() === new Date().getFullYear()
+                    );
+
+                    // Calculate balances based on policy
+                    const calculatedBalances = calculateLeaveBalances({ ...user, joinDate: user.joinedDate }, userRequests);
+
+                    // Extract balances and allocations from the calculation result
+                    const leaveBalance = {
+                        annualLeave: calculatedBalances.annualLeave,
+                        casualLeave: calculatedBalances.casualLeave,
+                        sickLeave: calculatedBalances.sickLeave,
+                        shortLeave: calculatedBalances.shortLeave
+                    };
+
+                    const leaveAllocations = {
+                        annualLeave: calculatedBalances.entitlements.annualLeave,
+                        sickLeave: calculatedBalances.entitlements.sickLeave,
+                        casualLeave: calculatedBalances.entitlements.casualLeave,
+                        shortLeave: LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT * 12 // 36 hours annual allowance
+                    };
+
+                    const userRef = doc(db, "users", user.uid || user.id);
+                    await updateDoc(userRef, {
+                        leaveBalance: leaveBalance,
+                        leaveAllocations: leaveAllocations,
+                        lastBalanceCalculation: new Date().toISOString(),
+                        balanceCalculationBy: userData.name
+                    });
+
+                    successCount++;
+                } catch (error) {
+                    console.error(`Error calculating balances for ${user.name}:`, error);
+                    errors.push(`${user.name}: ${error.message}`);
+                    errorCount++;
+                }
+            }
+
+            let messageText = `Leave balance calculation completed. ${successCount} employees updated successfully.`;
+            if (errorCount > 0) {
+                messageText += ` ${errorCount} errors occurred.`;
+            }
+            if (errors.length > 0) {
+                console.log('Calculation errors:', errors);
+            }
+
+            setMessage({
+                type: errorCount === 0 ? 'success' : 'warning',
+                text: messageText
+            });
+
+        } catch (error) {
+            console.error('Error calculating leave balances:', error);
+            setMessage({ type: 'error', text: `Error calculating leave balances: ${error.message}` });
+        } finally {
+            setIsCalculatingBalances(false);
+        }
+    };
 
     const pendingHRRequests = allRequests.filter(r => r.status === 'Pending HR Approval');
     const pendingFinalHRRequests = allRequests.filter(r => r.status === 'Pending HR Approval' && r.hrManagerApproval !== 'Approved');
@@ -960,6 +1049,45 @@ const selectedUser = users[employeeId];
         }
     };
 
+    // Function to handle joined date editing
+    const handleEditJoinedDate = (user) => {
+        setEditingJoinedDate(user);
+        setNewJoinedDate(user.joinedDate ? new Date(user.joinedDate).toISOString().split('T')[0] : '');
+    };
+
+    // Function to cancel joined date editing
+    const handleCancelJoinedDateEdit = () => {
+        setEditingJoinedDate(null);
+        setNewJoinedDate('');
+    };
+
+    // Function to save joined date changes
+    const saveJoinedDateChanges = async () => {
+        try {
+            if (!editingJoinedDate) {
+                throw new Error('No user selected for editing');
+            }
+
+            const userId = editingJoinedDate.uid || editingJoinedDate.id;
+            if (!userId) {
+                throw new Error('User ID not found');
+            }
+
+            const userRef = doc(db, "users", userId);
+            
+            await updateDoc(userRef, {
+                joinedDate: newJoinedDate ? new Date(newJoinedDate).toISOString() : null
+            });
+
+            setMessage({ type: 'success', text: `Joined date updated successfully for ${editingJoinedDate.name}` });
+            setEditingJoinedDate(null);
+            setNewJoinedDate('');
+        } catch (error) {
+            console.error("Error updating joined date:", error);
+            setMessage({ type: 'error', text: `Error updating joined date: ${error.message}` });
+        }
+    };
+
     return (
         <div className="space-y-6">
             {/* My Leave Section */}
@@ -1036,6 +1164,16 @@ const selectedUser = users[employeeId];
                     >
                         Short Leave Reset
                     </button>
+                    <button
+                        onClick={() => setActiveTab('policy')}
+                        className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                            activeTab === 'policy'
+                                ? 'border-blue-500 text-blue-400'
+                                : 'border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-300'
+                        }`}
+                    >
+                        Leave Policy
+                    </button>
                 </nav>
             </div>
             
@@ -1089,6 +1227,7 @@ const selectedUser = users[employeeId];
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Actions</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Employee</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Department</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Joined Date</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Next Evaluation</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Annual Leave</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Sick Leave</th>
@@ -1124,6 +1263,43 @@ const selectedUser = users[employeeId];
                                                 </button>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{user.department || 'N/A'}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+                                                {editingJoinedDate?.uid === user.uid || editingJoinedDate?.id === user.id ? (
+                                                    <div className="flex items-center space-x-2">
+                                                        <input
+                                                            type="date"
+                                                            value={newJoinedDate}
+                                                            onChange={(e) => setNewJoinedDate(e.target.value)}
+                                                            className="bg-card text-slate-200 border border-gray-600 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                                        />
+                                                        <button
+                                                            onClick={saveJoinedDateChanges}
+                                                            className="bg-green-600 text-white px-2 py-1 rounded text-xs hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+                                                        >
+                                                            Save
+                                                        </button>
+                                                        <button
+                                                            onClick={handleCancelJoinedDateEdit}
+                                                            className="bg-gray-600 text-white px-2 py-1 rounded text-xs hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex items-center space-x-2">
+                                                        <span>{user.joinedDate ? new Date(user.joinedDate).toLocaleDateString() : 'Not set'}</span>
+                                                        <button
+                                                            onClick={() => handleEditJoinedDate(user)}
+                                                            className="text-blue-400 hover:text-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-card rounded p-1"
+                                                            title="Edit Joined Date"
+                                                        >
+                                                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                            </svg>
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
                                                 {user.nextEvaluationDate ? new Date(user.nextEvaluationDate).toLocaleDateString() : 'Not set'}
                                             </td>
@@ -1561,6 +1737,87 @@ const selectedUser = users[employeeId];
                         </div>
                     </div>
                 )}
+                
+                {activeTab === 'policy' && (
+                    <div className="p-6 space-y-6">
+                        <div className="bg-muted p-6 rounded-lg">
+                            <h3 className="text-lg font-medium text-slate-200 mb-4">Leave Policy Information</h3>
+                            <p className="text-slate-400 mb-6">
+                                Reference guide for leave entitlements based on employee join date and current year.
+                            </p>
+                            <LeavePolicyReference />
+                        </div>
+                        
+                        {/* Employee Policy Calculator */}
+                        <div className="bg-muted p-6 rounded-lg">
+                            <h3 className="text-lg font-medium text-slate-200 mb-4">Employee Policy Calculator</h3>
+                            <p className="text-slate-400 mb-4">
+                                Select an employee to view their specific leave entitlements based on the policy.
+                            </p>
+                            
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Select Employee</label>
+                                    <select
+                                        value={editingUser?.uid || ''}
+                                        onChange={(e) => {
+                                            const userId = e.target.value;
+                                            const user = Object.values(users).find(u => u.uid === userId || u.id === userId);
+                                            setEditingUser(user || null);
+                                        }}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md bg-card text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                        <option value="">Choose an employee...</option>
+                                        {Object.values(filteredUsers).map(user => (
+                                            <option key={user.uid || user.id} value={user.uid || user.id}>
+                                                {user.name} - {user.employeeNumber || 'No ID'} - {user.department || 'No Dept'}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                
+                                {editingUser && (
+                                    <div>
+                                        <LeavePolicyInfo employee={editingUser} />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        
+                        {/* Bulk Balance Calculation */}
+                        <div className="bg-muted p-6 rounded-lg">
+                            <h3 className="text-lg font-medium text-slate-200 mb-4">Bulk Leave Balance Calculation</h3>
+                            <p className="text-slate-400 mb-4">
+                                Calculate and update leave balances for all employees based on the new policy.
+                            </p>
+                            
+                            <div className="bg-yellow-900/30 border border-yellow-600/50 p-4 rounded mb-4">
+                                <div className="flex items-start space-x-3">
+                                    <svg className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                                    </svg>
+                                    <div>
+                                        <h4 className="text-sm font-medium text-yellow-300 mb-1">Warning: Bulk Operation</h4>
+                                        <p className="text-sm text-yellow-200">
+                                            This will overwrite existing leave balances for all employees based on the new policy calculation.
+                                            This action cannot be undone. Please ensure you have a backup of current data.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="flex justify-end">
+                                <button
+                                    onClick={calculateAllLeaveBalances}
+                                    disabled={isCalculatingBalances}
+                                    className="px-6 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {isCalculatingBalances ? 'Calculating...' : 'Calculate All Balances'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Leave Request Modal */}
@@ -1592,6 +1849,13 @@ const selectedUser = users[employeeId];
                             </div>
 
                             <div className="space-y-6">
+                                {/* Leave Policy Information */}
+                                {editingUser && (
+                                    <div>
+                                        <LeavePolicyInfo employee={editingUser} />
+                                    </div>
+                                )}
+                                
                                 {/* Current Leave Balances Section */}
                                 <div>
                                     <h4 className="text-md font-semibold text-slate-300 mb-3">Current Leave Balances (Remaining Days)</h4>

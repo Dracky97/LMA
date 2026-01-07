@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { app } from '../lib/firebase-client';
 import { LEAVE_TYPES, getFilteredLeaveTypes } from '../lib/leaveTypes';
+import { validateShortLeave, getCurrentMonthShortLeaveUsage } from '../lib/leavePolicy';
 
 const db = getFirestore(app);
 
@@ -25,6 +26,10 @@ export default function LeaveRequestModal({ userData, onClose }) {
 
     // State for medical documentation reminder
     const [medicalDocumentRequired, setMedicalDocumentRequired] = useState(false);
+    
+    // State for short leave validation
+    const [allLeaveRequests, setAllLeaveRequests] = useState([]);
+    const [currentMonthShortLeaveUsage, setCurrentMonthShortLeaveUsage] = useState(0);
 
     // Predefined half-day options
     const HALF_DAY_OPTIONS = [
@@ -298,6 +303,20 @@ export default function LeaveRequestModal({ userData, onClose }) {
             setLeaveUnits(0);
         }
     }, [startTime, endTime, type]);
+    
+    // Load leave requests for short leave validation
+    useEffect(() => {
+        const unsubscribe = onSnapshot(collection(db, "leaveRequests"), (snapshot) => {
+            const requests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setAllLeaveRequests(requests);
+            
+            // Calculate current month short leave usage
+            const usage = getCurrentMonthShortLeaveUsage(userData.uid, requests);
+            setCurrentMonthShortLeaveUsage(usage);
+        });
+        
+        return () => unsubscribe();
+    }, [userData.uid]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -360,6 +379,21 @@ export default function LeaveRequestModal({ userData, onClose }) {
 
             if (endTime && !validateTime(endTime)) {
                 setError('End time must be between 8:00 AM and 5:00 PM.');
+                return;
+            }
+        }
+        
+        // Validate short leave policy
+        if (type === 'Short Leave' && totalHours > 0) {
+            const shortLeaveValidation = validateShortLeave(totalHours, currentMonthShortLeaveUsage);
+            
+            if (!shortLeaveValidation.isValid) {
+                setError(shortLeaveValidation.errors.join(' '));
+                return;
+            }
+            
+            if (!shortLeaveValidation.canFullyApprove) {
+                setError(shortLeaveValidation.errors.join(' '));
                 return;
             }
         }
@@ -461,8 +495,22 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                 </div>
                                 <div className="flex justify-between">
                                     <span className="text-slate-400">Short Leave:</span>
-                                    <span className="text-slate-200 font-medium">{leaveBalances.shortLeave || 0} days</span>
+                                    <span className="text-slate-200 font-medium">{leaveBalances.shortLeave || 0} hours</span>
                                 </div>
+                                {type === 'Short Leave' && (
+                                    <div className="col-span-2 mt-2 p-2 bg-indigo-900/30 rounded border border-indigo-600/50">
+                                        <div className="text-xs text-indigo-300 mb-1">Current Month Usage</div>
+                                        <div className="text-xs text-slate-300">
+                                            Used: {currentMonthShortLeaveUsage}h / 3h monthly allowance
+                                        </div>
+                                        <div className="text-xs text-slate-300">
+                                            Remaining: {Math.max(0, 3 - currentMonthShortLeaveUsage)}h
+                                        </div>
+                                        <div className="text-xs text-slate-400 mt-1">
+                                            Max 2h per request
+                                        </div>
+                                    </div>
+                                )}
                                 {userData.gender === 'female' && (
                                     <div className="flex justify-between">
                                         <span className="text-slate-400">Maternity Leave:</span>

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { getFirestore, collection, addDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { app } from '../lib/firebase-client';
 import { LEAVE_TYPES, getFilteredLeaveTypes } from '../lib/leaveTypes';
-import { validateShortLeave, getCurrentMonthShortLeaveUsage } from '../lib/leavePolicy';
+import { validateShortLeave, getCurrentMonthShortLeaveUsage, LEAVE_CONFIG } from '../lib/leavePolicy';
 
 const db = getFirestore(app);
 
@@ -14,6 +14,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
     const [endTime, setEndTime] = useState('');
     const [reason, setReason] = useState('');
     const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
     const [totalDays, setTotalDays] = useState(0);
     const [totalHours, setTotalHours] = useState(0);
     const [totalMinutes, setTotalMinutes] = useState(0);
@@ -201,6 +202,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
 
         selectedDates.forEach(date => {
             const config = dateConfigurations[date];
+            
             if (config) {
                 const { type: dayType, startTime: dayStartTime, endTime: dayEndTime } = config;
 
@@ -215,12 +217,13 @@ export default function LeaveRequestModal({ userData, onClose }) {
                     const [startHour, startMin] = dayStartTime.split(':').map(Number);
                     const [endHour, endMin] = dayEndTime.split(':').map(Number);
                     const diffMinutes = (endHour * 60 + endMin) - (startHour * 60 + startMin);
-
-                    // Short leave is now defined as < 90 minutes.
-                    if (diffMinutes < 90) {
-                         totalUnits += 0.5; // consume half day for short leave
+                    
+                    // Short leave is defined as < 120 minutes.
+                    // Short leave deducts from short leave balance (hours), not leave days
+                    if (diffMinutes < 120) {
+                         totalUnits += 0; // No day deduction for short leave
                     } else {
-                         totalUnits += 0;
+                         totalUnits += 1; // Treat as full day if >= 120 minutes
                     }
                 }
             } else {
@@ -228,8 +231,29 @@ export default function LeaveRequestModal({ userData, onClose }) {
                 totalUnits += 1;
             }
         });
-
+        
         return totalUnits;
+    };
+
+    // Calculate total hours from granular selections (separate function for display)
+    const calculateGranularTotalHours = () => {
+        let totalHours = 0;
+        
+        selectedDates.forEach(date => {
+            const config = dateConfigurations[date];
+            
+            if (config && config.type === 'short' && config.startTime && config.endTime) {
+                const [startHour, startMin] = config.startTime.split(':').map(Number);
+                const [endHour, endMin] = config.endTime.split(':').map(Number);
+                const diffMinutes = (endHour * 60 + endMin) - (startHour * 60 + startMin);
+                
+                if (diffMinutes < 120) {
+                    totalHours += diffMinutes / 60;
+                }
+            }
+        });
+        
+        return Math.round(totalHours * 100) / 100;
     };
 
     // Calculate total days with Saturday = 0.5 days, exclude Sundays
@@ -282,15 +306,21 @@ export default function LeaveRequestModal({ userData, onClose }) {
 
                 let units = 0;
 
-                // For all leave types - Updated to handle standardized half-day timing
-                if (diffMinutes <= 90) {
+                // Special handling for Short Leave - always 0 units since it doesn't deduct from leave days
+                if (type === 'Short Leave') {
                     units = 0;
-                } else if (diffMinutes > 90 && diffMinutes <= 270) {
+                    console.log('Short Leave: Setting leaveUnits to 0 (no day deduction)');
+                }
+                // For all other leave types - Updated to handle standardized half-day timing
+                // Threshold changed from 90 to 120 minutes
+                else if (diffMinutes <= 120) {
+                    units = 0;
+                } else if (diffMinutes > 120 && diffMinutes <= 270) {
                     units = 0.5;
                 } else if (diffMinutes > 270) {
                     units = 1;
                 }
-                
+
                 setLeaveUnits(units);
             } else {
                 setTotalHours(0);
@@ -320,30 +350,40 @@ export default function LeaveRequestModal({ userData, onClose }) {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        
+        console.log('Submit button clicked - starting validation');
+         
         // Basic validation
+        console.log('Checking dates:', { startDate, endDate });
         if (!startDate || !endDate) {
+            console.log('Validation failed: Missing dates');
             setError('Please select both start and end dates.');
             return;
         }
-        
+         
+        console.log('Checking date order');
         if (new Date(endDate) < new Date(startDate)) {
+            console.log('Validation failed: End date before start date');
             setError('End date must be after start date.');
             return;
         }
-        
+         
+        console.log('Checking manager assignment:', userData.managerId);
         if (!userData.managerId) {
+            console.log('Validation failed: No manager assigned');
             setError('You do not have a manager assigned. Please contact an Admin.');
             return;
         }
 
         // Validate time fields if provided
+        console.log('Validating time fields:', { startTime, endTime });
         if (startTime && !endTime) {
+            console.log('Validation failed: Missing end time');
             setError('Please select end time.');
             return;
         }
-        
+         
         if (!startTime && endTime) {
+            console.log('Validation failed: Missing start time');
             setError('Please select start time.');
             return;
         }
@@ -366,6 +406,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
         }
 
         // Validate business hours (8am - 5pm)
+        console.log('Validating business hours');
         if (startTime || endTime) {
             const validateTime = (timeStr) => {
                 const [hour] = timeStr.split(':').map(Number);
@@ -373,48 +414,78 @@ export default function LeaveRequestModal({ userData, onClose }) {
             };
 
             if (startTime && !validateTime(startTime)) {
+                console.log('Validation failed: Start time out of business hours');
                 setError('Start time must be between 8:00 AM and 5:00 PM.');
                 return;
             }
 
             if (endTime && !validateTime(endTime)) {
+                console.log('Validation failed: End time out of business hours');
                 setError('End time must be between 8:00 AM and 5:00 PM.');
                 return;
             }
         }
         
-        // Validate short leave policy
-        if (type === 'Short Leave' && totalHours > 0) {
-            const shortLeaveValidation = validateShortLeave(totalHours, currentMonthShortLeaveUsage);
+        // Validate short leave policy - Reverted to original 3 hours/month policy
+        console.log('Checking short leave validation');
+        if (type === 'Short Leave') {
+            console.log('Short leave validation:', { totalHours, currentMonthShortLeaveUsage });
             
-            if (!shortLeaveValidation.isValid) {
-                setError(shortLeaveValidation.errors.join(' '));
-                return;
-            }
+            // Debug: Check if totalHours is being calculated correctly
+            console.log('Debug - Short leave time calculation:', {
+                startTime,
+                endTime,
+                totalHours,
+                totalMinutes,
+                leaveUnits,
+                useGranularSelection
+            });
             
-            if (!shortLeaveValidation.canFullyApprove) {
-                setError(shortLeaveValidation.errors.join(' '));
+            if (totalHours > 0) {
+                // Original policy: validate based on hours
+                const shortLeaveValidation = validateShortLeave(totalHours, currentMonthShortLeaveUsage);
+                console.log('Short leave validation result:', shortLeaveValidation);
+
+                if (!shortLeaveValidation.isValid) {
+                    console.log('Short leave validation failed:', shortLeaveValidation.errors);
+                    setError(shortLeaveValidation.errors.join(' '));
+                    return;
+                }
+            } else {
+                console.log('Short leave totalHours is 0, skipping validation');
+                setError('Please select a valid time range for short leave.');
                 return;
             }
         }
 
         try {
+            console.log('Starting data preparation for submission');
             let finalLeaveUnits;
+            let granularTotalHours = 0;
 
             if (useGranularSelection) {
+                console.log('Using granular selection');
                 // Use granular calculation
                 finalLeaveUnits = calculateGranularLeaveUnits();
+                // Calculate hours for short leave tracking
+                granularTotalHours = calculateGranularTotalHours();
+                if (granularTotalHours > 0) {
+                    setTotalHours(granularTotalHours);
+                }
             } else {
+                console.log('Using simple calculation');
                 // Use simple calculation
                 if (startTime && endTime) {
+                    console.log('Using time-based leave units:', leaveUnits);
                     // Now `leaveUnits` is already correctly set by the `useEffect` hook
                     finalLeaveUnits = leaveUnits;
                 } else {
+                    console.log('Using total days:', totalDays);
                     finalLeaveUnits = totalDays;
                 }
             }
 
-
+            console.log('Preparing request data');
             const requestData = {
                 userId: userData.uid,
                 userName: userData.name,
@@ -433,13 +504,21 @@ export default function LeaveRequestModal({ userData, onClose }) {
                 ...(type === 'Leave in-lieu' && { substituteFor: substituteFor.trim() }),
             };
 
+            console.log('Request data prepared:', requestData);
+
             // Add granular configuration if used
             if (useGranularSelection) {
+                console.log('Adding granular configuration');
                 requestData.dateConfigurations = dateConfigurations;
+                // Save totalHours for short leave tracking in granular mode
+                if (granularTotalHours > 0) {
+                    requestData.totalHours = granularTotalHours;
+                }
             }
 
             // Add time-based fields if provided (for simple mode)
             if (!useGranularSelection && startTime && endTime) {
+                console.log('Adding time-based fields');
                 requestData.startTime = startTime;
                 requestData.endTime = endTime;
                 requestData.totalHours = totalHours;
@@ -448,8 +527,12 @@ export default function LeaveRequestModal({ userData, onClose }) {
                 requestData.isPartialDay = finalLeaveUnits < totalDays;
             }
 
+            console.log('Final request data:', requestData);
+            console.log('Attempting to submit to Firebase');
             await addDoc(collection(db, "leaveRequests"), requestData);
-            onClose();
+            console.log('Firebase submission successful');
+            setSuccess('Leave request submitted successfully!');
+            setTimeout(() => onClose(), 2000);
         } catch (err) {
             console.error("Error submitting leave request:", err);
             setError('Failed to submit request. Please try again.');
@@ -462,6 +545,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
                 <div className="p-6 overflow-y-auto flex-1">
                     <h2 className="text-xl font-bold text-slate-200 mb-4">Apply for Leave</h2>
                     {error && <div className="mb-4 text-red-400 bg-red-900/30 p-3 rounded">{error}</div>}
+                    {success && <div className="mb-4 text-green-400 bg-green-900/30 p-3 rounded">{success}</div>}
                     <form onSubmit={handleSubmit}>
                         {/* Leave Type */}
                         <div className="mb-4">
@@ -507,7 +591,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                             Remaining: {Math.max(0, 3 - currentMonthShortLeaveUsage)}h
                                         </div>
                                         <div className="text-xs text-slate-400 mt-1">
-                                            Max 2h per request
+                                            Max 2h per request, auto-resets monthly
                                         </div>
                                     </div>
                                 )}
@@ -529,26 +613,32 @@ export default function LeaveRequestModal({ userData, onClose }) {
                         {/* Date Selection Mode Toggle */}
                         <div className="mb-4">
                             <label className="block text-sm font-medium text-slate-300 mb-2">Leave Planning Mode</label>
-                            <div className="flex space-x-4">
-                                <label className="flex items-center">
+                            <div className="space-y-3">
+                                <label className="flex items-start">
                                     <input
                                         type="radio"
                                         name="selectionMode"
                                         checked={!useGranularSelection}
                                         onChange={() => setUseGranularSelection(false)}
-                                        className="mr-2"
+                                        className="mr-2 mt-1"
                                     />
-                                    <span className="text-sm text-slate-300">Simple Range</span>
+                                    <div>
+                                        <span className="text-sm text-slate-300 block">Simple Range</span>
+                                        <span className="text-xs text-slate-500">Quick selection for full days or half-days. Best for single-day requests.</span>
+                                    </div>
                                 </label>
-                                <label className="flex items-center">
+                                <label className="flex items-start">
                                     <input
                                         type="radio"
                                         name="selectionMode"
                                         checked={useGranularSelection}
                                         onChange={() => setUseGranularSelection(true)}
-                                        className="mr-2"
+                                        className="mr-2 mt-1"
                                     />
-                                    <span className="text-sm text-slate-300">Detailed Planning</span>
+                                    <div>
+                                        <span className="text-sm text-slate-300 block">Detailed Planning</span>
+                                        <span className="text-xs text-slate-500">Configure each day individually. Supports full days, half-days, short leave, and time-off for specific dates.</span>
+                                    </div>
                                 </label>
                             </div>
                         </div>
@@ -616,6 +706,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                                     >
                                                         <option value="full">Full Day</option>
                                                         <option value="half">Half Day</option>
+                                                        <option value="short">Short Leave</option>
                                                         <option value="na">Not Applicable</option>
                                                     </select>
                                                 </div>
@@ -647,6 +738,60 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                                         </div>
                                                     </div>
                                                 )}
+
+                                                {/* Short Leave Time Selection - Dropdown for office hours */}
+                                                {config.type === 'short' && (
+                                                    <div className="space-y-2">
+                                                        <div>
+                                                            <label className="block text-xs text-slate-400 mb-1">Short Leave Time</label>
+                                                            <div className="grid grid-cols-2 gap-2">
+                                                                <div>
+                                                                    <label className="block text-xs text-slate-500 mb-1">From</label>
+                                                                    <select
+                                                                        value={config.startTime || ''}
+                                                                        onChange={(e) => handleDateConfigurationChange(date, {
+                                                                            ...config,
+                                                                            startTime: e.target.value,
+                                                                            endTime: '' // Reset end time when start time changes
+                                                                        })}
+                                                                        className="w-full px-2 py-1 border border-gray-600 rounded text-xs bg-card text-slate-200"
+                                                                    >
+                                                                        <option value="">Select</option>
+                                                                        {Array.from({ length: 37 }, (_, i) => {
+                                                                            const hour = 8 + Math.floor(i / 4);
+                                                                            const minute = (i % 4) * 15;
+                                                                            const time = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+                                                                            return <option key={i} value={time}>{hour > 12 ? `${hour-12}:${minute.toString().padStart(2, '0')} PM` : hour === 12 ? `12:${minute.toString().padStart(2, '0')} PM` : `${hour}:${minute.toString().padStart(2, '0')} AM`}</option>;
+                                                                        })}
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-xs text-slate-500 mb-1">To</label>
+                                                                    <select
+                                                                        value={config.endTime || ''}
+                                                                        onChange={(e) => handleDateConfigurationChange(date, {
+                                                                            ...config,
+                                                                            endTime: e.target.value
+                                                                        })}
+                                                                        disabled={!config.startTime}
+                                                                        className="w-full px-2 py-1 border border-gray-600 rounded text-xs bg-card text-slate-200"
+                                                                    >
+                                                                        <option value="">Select</option>
+                                                                        {Array.from({ length: 37 }, (_, i) => {
+                                                                            const hour = 8 + Math.floor(i / 4);
+                                                                            const minute = (i % 4) * 15;
+                                                                            const time = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+                                                                            const startMinutes = config.startTime ? parseInt(config.startTime.split(':')[0]) * 60 + parseInt(config.startTime.split(':')[1]) : 0;
+                                                                            const currentMinutes = hour * 60 + minute;
+                                                                            if (currentMinutes <= startMinutes && config.startTime) return null;
+                                                                            return <option key={i} value={time}>{hour > 12 ? `${hour-12}:${minute.toString().padStart(2, '0')} PM` : hour === 12 ? `12:${minute.toString().padStart(2, '0')} PM` : `${hour}:${minute.toString().padStart(2, '0')} AM`}</option>;
+                                                                        })}
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         );
                                     })}
@@ -657,6 +802,11 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                     <div className="text-sm text-green-300">
                                         <strong>Total Leave Days: {calculateGranularLeaveUnits()}</strong>
                                     </div>
+                                    {calculateGranularTotalHours() > 0 && (
+                                        <div className="text-sm text-green-300 mt-1">
+                                            <strong>Total Short Leave Hours: {calculateGranularTotalHours()}h</strong>
+                                        </div>
+                                    )}
                                     <div className="text-xs text-green-400 mt-1">
                                         Based on your day-by-day configuration
                                     </div>
@@ -677,70 +827,86 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                     Half-day timing should be either 08:30 AM - 12:30 PM or 12:30 PM - 05:00 PM
                                 </div>
 
-                                {/* Predefined Half-Day Options */}
-                                <div className="space-y-2 mb-4">
-                                    <label className="block text-sm font-medium text-slate-300">Predefined Half-Day Options</label>
-                                    {HALF_DAY_OPTIONS.map((option, index) => (
-                                        <label key={index} className="flex items-center p-3 bg-muted rounded border border-gray-600 hover:bg-gray-700/50 cursor-pointer">
+                                {/* Predefined Half-Day Options - Hidden for Short Leave */}
+                                {type !== 'Short Leave' && (
+                                    <div className="space-y-2 mb-4">
+                                        <label className="block text-sm font-medium text-slate-300">Predefined Half-Day Options</label>
+                                        {HALF_DAY_OPTIONS.map((option, index) => (
+                                            <label key={index} className="flex items-center p-3 bg-muted rounded border border-gray-600 hover:bg-gray-700/50 cursor-pointer">
+                                                <input
+                                                    type="radio"
+                                                    name="timeSelectionMode"
+                                                    checked={startTime === option.startTime && endTime === option.endTime}
+                                                    onChange={() => {
+                                                        setStartTime(option.startTime);
+                                                        setEndTime(option.endTime);
+                                                    }}
+                                                    className="mr-3"
+                                                />
+                                                <span className="text-sm text-slate-200">{option.label}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Custom Time Range Option */}
+                                {type !== 'Short Leave' && (
+                                    <div className="space-y-2">
+                                        <label className="block text-sm font-medium text-slate-300">Or Custom Time Range</label>
+                                        <label className="flex items-center p-3 bg-muted rounded border border-gray-600 hover:bg-gray-700/50 cursor-pointer">
                                             <input
                                                 type="radio"
                                                 name="timeSelectionMode"
-                                                checked={startTime === option.startTime && endTime === option.endTime}
+                                                checked={!HALF_DAY_OPTIONS.some(option => startTime === option.startTime && endTime === option.endTime)}
                                                 onChange={() => {
-                                                    setStartTime(option.startTime);
-                                                    setEndTime(option.endTime);
+                                                    setStartTime('');
+                                                    setEndTime('');
                                                 }}
                                                 className="mr-3"
                                             />
-                                            <span className="text-sm text-slate-200">{option.label}</span>
+                                            <span className="text-sm text-slate-200">Custom time range</span>
                                         </label>
-                                    ))}
-                                </div>
+                                    </div>
+                                )}
 
-                                {/* Custom Time Range Option */}
-                                <div className="space-y-2">
-                                    <label className="block text-sm font-medium text-slate-300">Or Custom Time Range</label>
-                                    <label className="flex items-center p-3 bg-muted rounded border border-gray-600 hover:bg-gray-700/50 cursor-pointer">
-                                        <input
-                                            type="radio"
-                                            name="timeSelectionMode"
-                                            checked={!HALF_DAY_OPTIONS.some(option => startTime === option.startTime && endTime === option.endTime)}
-                                            onChange={() => {
-                                                setStartTime('');
-                                                setEndTime('');
-                                            }}
-                                            className="mr-3"
-                                        />
-                                        <span className="text-sm text-slate-200">Custom time range</span>
-                                    </label>
-                                </div>
-
-                                {/* Custom Time Inputs */}
-                                {startTime === '' && endTime === '' && (
+                                {/* Custom Time Inputs - 15 minute intervals for office hours */}
+                                {((!startTime || !endTime) || type === 'Short Leave') && (
                                     <div className="mt-3 grid grid-cols-2 gap-4">
                                         <div>
                                             <label className="block text-xs text-slate-400 mb-1">From</label>
-                                            <input
-                                                type="time"
+                                            <select
                                                 value={startTime}
                                                 onChange={(e) => setStartTime(e.target.value)}
-                                                min="08:00"
-                                                max="17:00"
-                                                step="60"
-                                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
-                                            />
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md bg-card text-slate-200"
+                                            >
+                                                <option value="">Select time</option>
+                                                {Array.from({ length: 37 }, (_, i) => {
+                                                    const hour = 8 + Math.floor(i / 4);
+                                                    const minute = (i % 4) * 15;
+                                                    const time = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+                                                    return <option key={i} value={time}>{hour > 12 ? `${hour-12}:${minute.toString().padStart(2, '0')} PM` : hour === 12 ? `12:${minute.toString().padStart(2, '0')} PM` : `${hour}:${minute.toString().padStart(2, '0')} AM`}</option>;
+                                                })}
+                                            </select>
                                         </div>
                                         <div>
                                             <label className="block text-xs text-slate-400 mb-1">To</label>
-                                            <input
-                                                type="time"
+                                            <select
                                                 value={endTime}
                                                 onChange={(e) => setEndTime(e.target.value)}
-                                                min="08:00"
-                                                max="17:00"
-                                                step="60"
-                                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
-                                            />
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md bg-card text-slate-200"
+                                                disabled={!startTime}
+                                            >
+                                                <option value="">Select time</option>
+                                                {Array.from({ length: 37 }, (_, i) => {
+                                                    const hour = 8 + Math.floor(i / 4);
+                                                    const minute = (i % 4) * 15;
+                                                    const time = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+                                                    const startMinutes = startTime ? parseInt(startTime.split(':')[0]) * 60 + parseInt(startTime.split(':')[1]) : 0;
+                                                    const currentMinutes = hour * 60 + minute;
+                                                    if (currentMinutes <= startMinutes && startTime) return null;
+                                                    return <option key={i} value={time}>{hour > 12 ? `${hour-12}:${minute.toString().padStart(2, '0')} PM` : hour === 12 ? `12:${minute.toString().padStart(2, '0')} PM` : `${hour}:${minute.toString().padStart(2, '0')} AM`}</option>;
+                                                })}
+                                            </select>
                                         </div>
                                     </div>
                                 )}
@@ -754,14 +920,14 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                                 <strong>
                                                     Leave Deduction: {leaveUnits} {leaveUnits === 0.5 ? 'half day' : leaveUnits === 1 ? 'full day' : 'days'}
                                                 </strong>
-                                                {totalMinutes <= 90 && (
+                                                {totalMinutes <= 120 && (
                                                     <div className="text-xs text-slate-400 mt-1">
-                                                        (Less than or equal to 90 minutes = no deduction)
+                                                        (Less than or equal to 120 minutes = no deduction)
                                                     </div>
                                                 )}
-                                                {totalMinutes > 90 && totalMinutes <= 270 && (
+                                                {totalMinutes > 120 && totalMinutes <= 270 && (
                                                     <div className="text-xs text-slate-400 mt-1">
-                                                        (Greater than 90 minutes and up to 4.5 hours = half day)
+                                                        (Greater than 120 minutes and up to 4.5 hours = half day)
                                                     </div>
                                                 )}
                                                 {totalMinutes > 270 && (
@@ -780,7 +946,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                              <div className="text-sm text-green-300 bg-green-900/20 p-2 rounded">
                                                 <strong>No leave deduction</strong>
                                                 <div className="text-xs text-green-400 mt-1">
-                                                    (Less than 90 minutes)
+                                                    (Less than 120 minutes)
                                                 </div>
                                             </div>
                                         )}

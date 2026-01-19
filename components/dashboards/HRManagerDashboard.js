@@ -291,9 +291,66 @@ export default function HRManagerDashboard() {
         }
     };
 
+    // Recalculate all leave balances for a user after cancellation
+    const recalculateUserBalances = async (userId) => {
+        try {
+            console.log('🔄 Recalculating leave balances for user:', userId);
+
+            const user = users[userId];
+            if (!user) {
+                throw new Error('User not found');
+            }
+
+            // Get all leave requests for this user
+            const userRequests = allRequests.filter(req => req.userId === userId);
+
+            // Calculate balances based on policy
+            const calculatedBalances = calculateLeaveBalances({ ...user, joinDate: user.joinedDate }, userRequests);
+
+            // Extract balances and allocations from the calculation result
+            const leaveBalance = {
+                annualLeave: calculatedBalances.annualLeave,
+                casualLeave: calculatedBalances.casualLeave,
+                sickLeave: calculatedBalances.sickLeave,
+                shortLeave: calculatedBalances.shortLeave
+            };
+
+            const leaveAllocations = {
+                annualLeave: calculatedBalances.entitlements.annualLeave,
+                sickLeave: calculatedBalances.entitlements.sickLeave,
+                casualLeave: calculatedBalances.entitlements.casualLeave,
+                shortLeave: LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT * 12 // 36 hours annual allowance
+            };
+
+            console.log('📊 Recalculated balances:', { leaveBalance, leaveAllocations });
+
+            const userRef = doc(db, "users", userId);
+            await updateDoc(userRef, {
+                leaveBalance: leaveBalance,
+                leaveAllocations: leaveAllocations,
+                lastBalanceCalculation: new Date().toISOString(),
+                balanceCalculationBy: userData.name
+            });
+
+            console.log('✅ User balances recalculated successfully');
+        } catch (error) {
+            console.error("❌ Error recalculating user balances:", error);
+            throw error;
+        }
+    };
+
     // Restore previously deducted/added leave for a cancelled request
     const restoreLeaveBalance = async (request) => {
         try {
+            console.log('🔄 Starting leave balance restoration for cancelled request:', {
+                requestId: request.id,
+                userId: request.userId,
+                type: request.type,
+                leaveUnits: request.leaveUnits,
+                startDate: request.startDate,
+                endDate: request.endDate
+            });
+
             const userRef = doc(db, "users", request.userId);
             const userDoc = await getDoc(userRef);
 
@@ -303,6 +360,8 @@ export default function HRManagerDashboard() {
 
             const currentData = userDoc.data();
             const leaveType = LEAVE_TYPE_MAP[request.type] || (request.type ? request.type.toLowerCase().replace(' ', '') : 'annualleave');
+
+            console.log('📊 Current user leave balance before restoration:', currentData.leaveBalance);
 
             if (!currentData.leaveBalance) {
                 currentData.leaveBalance = {};
@@ -318,10 +377,16 @@ export default function HRManagerDashboard() {
                 ? request.leaveUnits
                 : Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
 
+            console.log('🔢 Calculated duration for restoration:', duration);
+
             // For accruing types, approval ADDED balance, so cancellation should SUBTRACT it back.
             // For normal types, approval SUBTRACTED balance, so cancellation should ADD it back.
             const isAccruingType = (leaveType === 'leave in-lieu' || leaveType === 'other');
             const newBalance = isAccruingType ? currentBalance - duration : currentBalance + duration;
+
+            console.log('⚠️  POTENTIAL BUG DETECTED: Cross-utilization not handled in restoration!');
+            console.log('If cross-utilization occurred during approval, this restoration may be incorrect.');
+            console.log('Original deduction logic handles cross-utilization, but restoration does not reverse it properly.');
 
             console.log('Restoring leave due to cancellation:', {
                 leaveType,
@@ -332,28 +397,35 @@ export default function HRManagerDashboard() {
             });
 
             const updatedLeaveBalance = { ...currentData.leaveBalance, [leaveType]: newBalance };
+            console.log('📈 Updated leave balance after restoration:', updatedLeaveBalance);
+
             const hasNegativeBalance = Object.values(updatedLeaveBalance).some(balance => balance < 0);
             const currentlyOnNoPay = currentData.noPayStatus || false;
 
             if (hasNegativeBalance && !currentlyOnNoPay) {
+                console.log('🚨 Setting no-pay status due to negative balance');
                 await updateDoc(userRef, {
                     [`leaveBalance.${leaveType}`]: newBalance,
                     noPayStatus: true,
                     noPayStartDate: new Date().toISOString()
                 });
             } else if (!hasNegativeBalance && currentlyOnNoPay) {
+                console.log('✅ Clearing no-pay status');
                 await updateDoc(userRef, {
                     [`leaveBalance.${leaveType}`]: newBalance,
                     noPayStatus: false,
                     noPayEndDate: new Date().toISOString()
                 });
             } else {
+                console.log('🔄 Updating balance without no-pay status change');
                 await updateDoc(userRef, {
                     [`leaveBalance.${leaveType}`]: newBalance
                 });
             }
+
+            console.log('✅ Leave balance restoration completed successfully');
         } catch (error) {
-            console.error("Error restoring leave balance:", error);
+            console.error("❌ Error restoring leave balance:", error);
             throw error;
         }
     };
@@ -379,10 +451,11 @@ export default function HRManagerDashboard() {
                 cancellationDate: new Date().toISOString()
             });
 
-            // Restore balance accordingly
-            await restoreLeaveBalance(request);
+            // Instead of trying to reverse the deduction (which fails with cross-utilization),
+            // recalculate all leave balances for the user to ensure accuracy
+            await recalculateUserBalances(request.userId);
 
-            setMessage({ type: 'success', text: 'Leave cancelled and balance restored successfully.' });
+            setMessage({ type: 'success', text: 'Leave cancelled and balance recalculated successfully.' });
         } catch (error) {
             console.error('Error cancelling leave:', error);
             setMessage({ type: 'error', text: `Error cancelling leave: ${error.message}` });

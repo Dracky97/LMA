@@ -288,10 +288,10 @@ exports.resetMonthlyShortLeave = onSchedule({
             const userData = doc.data();
             const userRef = db.collection('users').doc(doc.id);
 
-            // Reset short leave balance to 1 for all users
+            // Reset short leave balance to 3 for all users
             batch.update(userRef, {
-                'leaveBalance.shortLeave': 1,
-                'leaveAllocations.shortLeave': 1,
+                'leaveBalance.shortLeave': 3,
+                'leaveAllocations.shortLeave': 3,
                 shortLeaveLastReset: currentDate,
                 shortLeaveResetBy: 'Automated System'
             });

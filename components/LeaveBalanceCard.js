@@ -26,9 +26,9 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
             const formatted = formatNumber(num);
             const absNum = Math.abs(num);
 
-            // Special handling for short leave - show as "X total" instead of "X day/days"
+            // Special handling for short leave - show as "X Hours" instead of "X day/days"
             if (type.key === 'shortLeave') {
-                return `${formatted} total`;
+                return `${formatted} Hours`;
             }
 
             return absNum === 1 ? `${formatted} day` : `${formatted} days`;
@@ -73,7 +73,7 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
             return {
                 mainNumber: formatNumber(remaining),
                 mainLabel: 'Remaining',
-                sub: `${formatNumber(total)} leave total`,
+                sub: `${formatNumber(total)} Hours total`,
                 showProgress: true,
                 percentage: percentageUsed,
                 status: remaining <= 0 ? 'low' : 'good',

@@ -6,6 +6,7 @@ import DashboardLayout from '../components/DashboardLayout';
 import ManagerRequestsTable from '../components/ManagerRequestsTable';
 import LeaveHistoryTable from '../components/LeaveHistoryTable';
 import { LEAVE_TYPE_MAP, validateLeaveType } from '../lib/leaveTypes';
+import { LEAVE_CONFIG } from '../lib/leavePolicy';
 
 const db = getFirestore(app);
 
@@ -146,15 +147,26 @@ export default function TeamRequestsPage() {
 
             // Initialize missing leave type if needed
             if (!currentData.leaveBalance.hasOwnProperty(leaveType)) {
-                currentData.leaveBalance[leaveType] = 0;
+                // Special initialization for Short Leave - start with monthly limit
+                if (leaveType === 'shortLeave') {
+                    currentData.leaveBalance[leaveType] = LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT;
+                } else {
+                    currentData.leaveBalance[leaveType] = 0;
+                }
             }
 
             const currentBalance = currentData.leaveBalance[leaveType];
 
-            // Use leaveUnits if available, otherwise calculate from dates
-            const duration = request.leaveUnits !== undefined && request.leaveUnits > 0
-                ? request.leaveUnits
-                : Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
+            // Special handling for Short Leave - deduct hours instead of days
+            let duration;
+            if (request.type === 'Short Leave') {
+                duration = request.totalHours || 0;
+            } else {
+                // Use leaveUnits if available, otherwise calculate from dates
+                duration = request.leaveUnits !== undefined && request.leaveUnits > 0
+                    ? request.leaveUnits
+                    : Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
+            }
 
             const newBalance = currentBalance - duration;
 

@@ -73,6 +73,7 @@ export default function AdminDashboard() {
         'CMO',
         'CFO',
         'COO',
+        'Registrar',
         'Head of Academic',
         'Academic - Senior Lecturer',
         'Head - Student Support',
@@ -390,6 +391,7 @@ export default function AdminDashboard() {
                 maternityLeave: user.leaveBalance?.maternityLeave ?? 0,
                 paternityLeave: user.leaveBalance?.paternityLeave ?? 0,
                 'leave in-lieu': user.leaveBalance?.['leave in-lieu'] ?? 0,
+                shortLeave: user.leaveBalance?.shortLeave ?? 0,
                 unpaidLeave: user.leaveBalance?.unpaidLeave ?? 0,
                 other: user.leaveBalance?.other ?? 0
             },
@@ -400,6 +402,7 @@ export default function AdminDashboard() {
                 maternityLeave: user.leaveAllocations?.maternityLeave ?? 0,
                 paternityLeave: user.leaveAllocations?.paternityLeave ?? 0,
                 'leave in-lieu': user.leaveAllocations?.['leave in-lieu'] ?? 0,
+                shortLeave: user.leaveAllocations?.shortLeave ?? 0,
                 other: user.leaveAllocations?.other ?? 0
             }
         });

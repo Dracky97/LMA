@@ -6,6 +6,7 @@ import ManagerRequestsTable from '../ManagerRequestsTable';
 import LeaveHistoryTable from '../LeaveHistoryTable';
 import MyLeaveSection from '../MyLeaveSection';
 import { LEAVE_TYPE_MAP, validateLeaveType } from '../../lib/leaveTypes';
+import { LEAVE_CONFIG } from '../../lib/leavePolicy';
 
 const db = getFirestore(app);
 
@@ -158,9 +159,15 @@ export default function DepartmentManagerDashboard() {
             }
 
             // Use leaveUnits if available, otherwise calculate from dates
-            const duration = request.leaveUnits !== undefined && request.leaveUnits > 0
-                ? request.leaveUnits
-                : Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
+            // Special handling for Short Leave - deduct hours instead of days
+            let duration;
+            if (request.type === 'Short Leave') {
+                duration = request.totalHours || 0;
+            } else {
+                duration = request.leaveUnits !== undefined && request.leaveUnits > 0
+                    ? request.leaveUnits
+                    : Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
+            }
 
             // Handle cross-utilization for Annual and Casual leave
             const updatedLeaveBalance = { ...currentData.leaveBalance };
@@ -194,7 +201,8 @@ export default function DepartmentManagerDashboard() {
             } else {
                 // Initialize leave type if needed
                 if (!updatedLeaveBalance[leaveType]) {
-                    updatedLeaveBalance[leaveType] = 0;
+                    // Special initialization for Short Leave - start with monthly limit
+                    updatedLeaveBalance[leaveType] = leaveType === 'shortLeave' ? LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT : 0;
                 }
                 updatedLeaveBalance[leaveType] = updatedLeaveBalance[leaveType] - duration;
             }

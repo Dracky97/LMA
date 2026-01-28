@@ -426,38 +426,20 @@ export default function LeaveRequestModal({ userData, onClose }) {
             }
         }
         
-        // Validate short leave policy - Reverted to original 3 hours/month policy
-        console.log('Checking short leave validation');
+        // Validate short leave policy - 3 hours/month, auto-reset monthly
         if (type === 'Short Leave') {
-            console.log('Short leave validation:', { totalHours, currentMonthShortLeaveUsage });
-            
-            // Debug: Check if totalHours is being calculated correctly
-            console.log('Debug - Short leave time calculation:', {
-                startTime,
-                endTime,
-                totalHours,
-                totalMinutes,
-                leaveUnits,
-                useGranularSelection
-            });
-            
             if (totalHours > 0) {
-                // Original policy: validate based on hours
                 const shortLeaveValidation = validateShortLeave(totalHours, currentMonthShortLeaveUsage);
-                console.log('Short leave validation result:', shortLeaveValidation);
-
                 if (!shortLeaveValidation.isValid) {
-                    console.log('Short leave validation failed:', shortLeaveValidation.errors);
                     setError(shortLeaveValidation.errors.join(' '));
                     return;
                 }
             } else {
-                console.log('Short leave totalHours is 0, skipping validation');
                 setError('Please select a valid time range for short leave.');
                 return;
             }
         }
-
+        
         try {
             console.log('Starting data preparation for submission');
             let finalLeaveUnits;
@@ -942,11 +924,19 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                                 )}
                                             </div>
                                         )}
-                                        {leaveUnits === 0 && (
+                                        {leaveUnits === 0 && type !== 'Short Leave' && (
                                              <div className="text-sm text-green-300 bg-green-900/20 p-2 rounded">
                                                 <strong>No leave deduction</strong>
                                                 <div className="text-xs text-green-400 mt-1">
                                                     (Less than 120 minutes)
+                                                </div>
+                                            </div>
+                                        )}
+                                        {type === 'Short Leave' && (
+                                            <div className="text-sm text-blue-300 bg-blue-900/20 p-2 rounded">
+                                                <strong>Short Leave Deduction</strong>
+                                                <div className="text-xs text-blue-400 mt-1">
+                                                    (Will deduct {totalHours} hours from your short leave balance)
                                                 </div>
                                             </div>
                                         )}

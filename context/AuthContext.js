@@ -13,6 +13,7 @@ import {
 } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { app } from '../lib/firebase-client';
+import { LEAVE_CONFIG } from '../lib/leavePolicy';
 
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -100,9 +101,13 @@ export const AuthProvider = ({ children }) => {
             const evaluationDate = new Date(evaluationStartDate);
             evaluationDate.setMonth(evaluationDate.getMonth() + 3);
 
-            // No default leave balances or allocations at signup
-            const leaveBalance = {};
-            const leaveAllocations = {};
+            // Initialize default leave balances for new users
+            const leaveBalance = {
+                shortLeave: LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT // Every eligible user starts with 3 short leave hours
+            };
+            const leaveAllocations = {
+                shortLeave: LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT * 12 // 36 hours annual allocation
+            };
 
             return await setDoc(doc(db, 'users', newUser.uid), {
                 name,

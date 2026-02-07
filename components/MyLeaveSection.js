@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getFirestore, collection, query, where, onSnapshot } from 'firebase/firestore';
 import { app } from '../lib/firebase-client';
+import { LEAVE_CONFIG, getCurrentMonthShortLeaveUsage } from '../lib/leavePolicy';
 import LeaveBalanceCard from './LeaveBalanceCard';
 import LeaveHistoryTable from './LeaveHistoryTable';
 import LeaveRequestModal from './LeaveRequestModal';
@@ -35,9 +36,20 @@ export default function MyLeaveSection() {
     return <div>Loading personal leave info...</div>;
   }
 
+  // Dynamically calculate short leave balance based on current month usage
+  // This ensures the balance always resets at the start of each month
+  const currentMonthShortLeaveUsage = getCurrentMonthShortLeaveUsage(userData.uid, leaveRequests);
+  const calculatedShortLeaveBalance = Math.max(0, LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT - currentMonthShortLeaveUsage);
+
+  // Merge calculated short leave balance with stored balances
+  const calculatedBalances = {
+    ...userData.leaveBalance,
+    shortLeave: calculatedShortLeaveBalance
+  };
+
   return (
     <div className="space-y-8">
-      <LeaveBalanceCard balances={userData.leaveBalance} gender={userData.gender} userData={userData} />
+      <LeaveBalanceCard balances={calculatedBalances} gender={userData.gender} userData={userData} />
       <div className="bg-card p-6 rounded-lg shadow-sm">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold text-slate-200">My Leave Requests</h2>

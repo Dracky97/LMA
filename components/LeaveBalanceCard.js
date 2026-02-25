@@ -77,8 +77,8 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
             
             return {
                 mainNumber: formatNumber(remaining),
-                mainLabel: 'Remaining',
-                sub: `${formatNumber(monthlyLimit)}h monthly (auto-resets)`,
+                mainLabel: 'Hours Remaining',
+                sub: `${formatNumber(monthlyLimit)} Hours monthly`,
                 showProgress: true,
                 percentage: percentageUsed,
                 status: remaining <= 0 ? 'low' : 'good',

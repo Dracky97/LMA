@@ -102,11 +102,13 @@ export const AuthProvider = ({ children }) => {
             evaluationDate.setMonth(evaluationDate.getMonth() + 3);
 
             // Initialize default leave balances for new users
+            // Note: Short Leave uses monthly reset (3h/month), not annual allocation
             const leaveBalance = {
                 shortLeave: LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT // Every eligible user starts with 3 short leave hours
             };
             const leaveAllocations = {
-                shortLeave: LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT * 12 // 36 hours annual allocation
+                // Short Leave is NOT included here - it auto-resets monthly
+                // Other leave types will be added by HR based on policy
             };
 
             return await setDoc(doc(db, 'users', newUser.uid), {

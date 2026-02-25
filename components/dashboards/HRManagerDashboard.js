@@ -512,7 +512,36 @@ export default function HRManagerDashboard() {
     const saveBalanceChanges = async () => {
         if (!editingUser) return;
         try {
-             // simplified update logic
+            // Validate against policy if join date exists
+            let policyWarning = '';
+            if (editingUser.joinDate) {
+                try {
+                    const policyEntitlements = calculateLeaveEntitlements(editingUser.joinDate, new Date().getFullYear());
+                    
+                    // Check if manual values deviate significantly from policy
+                    const warnings = [];
+                    if (editBalanceData.annualLeaveTotal !== policyEntitlements.annualLeave) {
+                        warnings.push(`Annual Leave allocation (${editBalanceData.annualLeaveTotal}) differs from policy (${policyEntitlements.annualLeave})`);
+                    }
+                    if (editBalanceData.sickLeaveTotal !== policyEntitlements.sickLeave) {
+                        warnings.push(`Sick Leave allocation (${editBalanceData.sickLeaveTotal}) differs from policy (${policyEntitlements.sickLeave})`);
+                    }
+                    if (editBalanceData.casualLeaveTotal !== policyEntitlements.casualLeave) {
+                        warnings.push(`Casual Leave allocation (${editBalanceData.casualLeaveTotal}) differs from policy (${policyEntitlements.casualLeave})`);
+                    }
+                    
+                    if (warnings.length > 0) {
+                        policyWarning = '\n\nPolicy Deviation Warning:\n' + warnings.join('\n');
+                        if (!confirm(`You are setting values that differ from the policy:${policyWarning}\n\nDo you want to proceed?`)) {
+                            return;
+                        }
+                    }
+                } catch (policyError) {
+                    console.warn('Could not validate against policy:', policyError);
+                }
+            }
+            
+            // Short Leave should NOT have annual allocation - always use monthly reset
             await updateDoc(doc(db, "users", editingUser.uid), {
                 leaveBalance: {
                     ...editingUser.leaveBalance,
@@ -526,10 +555,11 @@ export default function HRManagerDashboard() {
                     annualLeave: editBalanceData.annualLeaveTotal,
                     sickLeave: editBalanceData.sickLeaveTotal,
                     casualLeave: editBalanceData.casualLeaveTotal
+                    // Note: shortLeave allocation intentionally omitted - uses monthly reset
                 }
             });
             setShowEditBalanceModal(false);
-            setMessage({ type: 'success', text: 'Balances updated.' });
+            setMessage({ type: 'success', text: 'Balances updated.' + (policyWarning ? ' (Policy deviation noted)' : '') });
         } catch (error) {
             setMessage({ type: 'error', text: error.message });
         }

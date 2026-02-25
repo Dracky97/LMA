@@ -454,9 +454,40 @@ export default function AdminDashboard() {
             console.log('User document reference:', userDocRef.path);
 
             // Prepare update data with all editable fields
+            // Remove shortLeave from allocations - it uses monthly reset, not annual allocation
             const sanitizedAllocations = Object.fromEntries(
-                Object.entries(editUserData.leaveAllocations || {}).filter(([k]) => k !== 'leave in-lieu' && k !== 'other')
+                Object.entries(editUserData.leaveAllocations || {}).filter(([k]) =>
+                    k !== 'leave in-lieu' && k !== 'other' && k !== 'shortLeave'
+                )
             );
+            
+            // Validate against policy if join date exists
+            if (editUserData.joinedDate) {
+                try {
+                    const { calculateLeaveEntitlements } = require('../../lib/leavePolicy');
+                    const policyEntitlements = calculateLeaveEntitlements(editUserData.joinedDate, new Date().getFullYear());
+                    
+                    // Check for significant deviations
+                    const warnings = [];
+                    if (sanitizedAllocations.annualLeave && sanitizedAllocations.annualLeave !== policyEntitlements.annualLeave) {
+                        warnings.push(`Annual Leave: ${sanitizedAllocations.annualLeave} (Policy: ${policyEntitlements.annualLeave})`);
+                    }
+                    if (sanitizedAllocations.sickLeave && sanitizedAllocations.sickLeave !== policyEntitlements.sickLeave) {
+                        warnings.push(`Sick Leave: ${sanitizedAllocations.sickLeave} (Policy: ${policyEntitlements.sickLeave})`);
+                    }
+                    if (sanitizedAllocations.casualLeave && sanitizedAllocations.casualLeave !== policyEntitlements.casualLeave) {
+                        warnings.push(`Casual Leave: ${sanitizedAllocations.casualLeave} (Policy: ${policyEntitlements.casualLeave})`);
+                    }
+                    
+                    if (warnings.length > 0) {
+                        console.warn('Policy deviation detected:', warnings);
+                        // Log but don't block - Admin has override authority
+                    }
+                } catch (policyError) {
+                    console.warn('Could not validate against policy:', policyError);
+                }
+            }
+            
             const updateData = {
                 name: editUserData.name,
                 email: editUserData.email,

@@ -36,9 +36,11 @@ The system now implements three distinct leave conditions based on employee join
 
 ### 3. Short Leave Policy
 
-- **Monthly Allowance**: 3 hours per month
+- **Monthly Allowance**: 3 hours per month (auto-resets monthly)
 - **Maximum per Request**: 2 hours
 - **Validation**: Cannot apply for 3+ hours in a single request
+- **Important**: Short Leave does NOT use annual allocation - it automatically resets to 3 hours at the start of each month
+- **No Carryover**: Unused short leave hours do not carry over to the next month
 
 ## 📁 Files Created/Modified
 
@@ -244,6 +246,33 @@ HR can now automatically calculate and update leave balances for all employees b
 2. **UI Modifications**: Update `components/LeavePolicyInfo.js` for display changes
 3. **Validation Rules**: Adjust short leave validation in modal components
 4. **Data Migration**: Use bulk calculation feature for existing employee data
+
+## ⚠️ Policy Conflict Resolution (February 2026)
+
+### Issues Identified and Fixed:
+
+1. **Short Leave Calculation Conflict**
+   - **Problem**: Short Leave was using both monthly reset (3h/month) AND annual allocation (36h/year) approaches inconsistently
+   - **Solution**: Removed annual allocation for Short Leave; now exclusively uses monthly reset (3h/month, auto-resets)
+   - **Files Modified**:
+     - [`context/AuthContext.js`](context/AuthContext.js) - Removed shortLeave from leaveAllocations
+     - [`functions/index.js`](functions/index.js) - Removed annual allocation from monthly reset function
+     - [`components/LeaveBalanceCard.js`](components/LeaveBalanceCard.js) - Updated to show monthly limit instead of annual allocation
+
+2. **Manual Balance Editing Override**
+   - **Problem**: HR/Admin could manually edit leave balances without validation against policy calculations
+   - **Solution**: Added policy validation warnings when manual edits deviate from policy-calculated entitlements
+   - **Files Modified**:
+     - [`components/dashboards/HRManagerDashboard.js`](components/dashboards/HRManagerDashboard.js) - Added validation with confirmation prompt
+     - [`components/dashboards/AdminDashboard.js`](components/dashboards/AdminDashboard.js) - Added validation logging (Admin has override authority)
+
+### Key Policy Rules (Clarified):
+
+- **Short Leave**: 3 hours per month, auto-resets monthly, NO annual allocation, NO carryover
+- **Annual Leave**: Based on join date condition (A/B/C) and quarterly entitlements for Condition B
+- **Sick Leave**: 7 days standard for all conditions
+- **Casual Leave**: 7 days standard (except Condition A: 0.5 days per completed month)
+- **Manual Edits**: HR receives warnings when deviating from policy; Admin can override with logging
 
 ---
 

@@ -14,7 +14,8 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
 
     const formatLeaveBalance = (type) => {
         const remaining = balances[type.key] || 0;
-        const allocation = userData?.leaveAllocations?.[type.key];
+        // Short Leave does NOT use annual allocation - it resets monthly
+        const allocation = type.key === 'shortLeave' ? null : userData?.leaveAllocations?.[type.key];
 
         // Helper function to format numbers (show decimals only if needed)
         const formatNumber = (num) => {
@@ -68,12 +69,16 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
         const used = Math.max(0, total - remaining);
         const percentageUsed = total > 0 ? (used / total) * 100 : 0;
 
-        // Special handling for short leave - show as count, not days
+        // Special handling for short leave - monthly reset (3h/month), no annual allocation
         if (type.key === 'shortLeave') {
+            const monthlyLimit = 3; // LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT
+            const used = Math.max(0, monthlyLimit - remaining);
+            const percentageUsed = (used / monthlyLimit) * 100;
+            
             return {
                 mainNumber: formatNumber(remaining),
                 mainLabel: 'Remaining',
-                sub: `${formatNumber(total)} Hours total`,
+                sub: `${formatNumber(monthlyLimit)}h monthly (auto-resets)`,
                 showProgress: true,
                 percentage: percentageUsed,
                 status: remaining <= 0 ? 'low' : 'good',

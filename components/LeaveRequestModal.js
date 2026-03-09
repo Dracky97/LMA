@@ -561,7 +561,9 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                 </div>
                                 <div className="flex justify-between">
                                     <span className="text-slate-400">Short Leave:</span>
-                                    <span className="text-slate-200 font-medium">{leaveBalances.shortLeave || 0} hours</span>
+                                    <span className="text-slate-200 font-medium">
+                                        {Math.max(0, LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT - currentMonthShortLeaveUsage)} {Math.max(0, LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT - currentMonthShortLeaveUsage) === 1 ? 'hour' : 'hours'}
+                                    </span>
                                 </div>
                                 {type === 'Short Leave' && (
                                     <div className="col-span-2 mt-2 p-2 bg-indigo-900/30 rounded border border-indigo-600/50">

@@ -16,7 +16,7 @@ import html2canvas from 'html2canvas';
 const db = getFirestore(app);
 
 export default function HRManagerDashboard() {
-    const { userData } = useAuth();
+    const { userData, signup } = useAuth();
     const router = useRouter();
     
     // --- State Management ---
@@ -47,6 +47,34 @@ export default function HRManagerDashboard() {
     const [isSubmittingManualLeave, setIsSubmittingManualLeave] = useState(false);
     const [isCalculatingBalances, setIsCalculatingBalances] = useState(false);
 
+    // Add User State
+    const [showAddUserForm, setShowAddUserForm] = useState(false);
+    const [newUser, setNewUser] = useState({
+        name: '',
+        email: '',
+        password: '',
+        department: '',
+        managerId: '',
+        employeeNumber: '',
+        gender: '',
+        designation: '',
+        birthday: '',
+        employeeStatus: 'probation',
+        joinedDate: '',
+        role: 'Employee'
+    });
+    const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
+    
+    // User Management State
+    const [userSearchQuery, setUserSearchQuery] = useState('');
+    const [userRoleFilter, setUserRoleFilter] = useState('');
+    const [userDepartmentFilter, setUserDepartmentFilter] = useState('');
+    const [filteredUsersList, setFilteredUsersList] = useState([]);
+    const [showEditUserModal, setShowEditUserModal] = useState(false);
+    const [editingUserData, setEditingUserData] = useState(null);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
+
     // --- Data Fetching ---
     useEffect(() => {
         const usersUnsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
@@ -74,7 +102,51 @@ export default function HRManagerDashboard() {
         };
     }, []);
 
-    // Filter and sort users
+    // Filter users for the Users tab
+    useEffect(() => {
+        let usersList = Object.values(users);
+
+        // Apply search query filter
+        if (userSearchQuery.trim()) {
+            usersList = usersList.filter(user =>
+                user.name?.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
+                user.email?.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
+                user.employeeNumber?.toLowerCase().includes(userSearchQuery.toLowerCase())
+            );
+        }
+
+        // Apply role filter
+        if (userRoleFilter) {
+            usersList = usersList.filter(user => user.role === userRoleFilter);
+        }
+
+        // Apply department filter
+        if (userDepartmentFilter) {
+            usersList = usersList.filter(user => user.department === userDepartmentFilter);
+        }
+
+        // Sort by employee number
+        usersList.sort((a, b) => {
+            const empNumA = a.employeeNumber || '';
+            const empNumB = b.employeeNumber || '';
+            if (!empNumA && !empNumB) return 0;
+            if (!empNumA) return 1;
+            if (!empNumB) return -1;
+
+            const numA = parseInt(empNumA);
+            const numB = parseInt(empNumB);
+
+            if (!isNaN(numA) && !isNaN(numB)) {
+                return numA - numB;
+            } else {
+                return empNumA.localeCompare(empNumB);
+            }
+        });
+
+        setFilteredUsersList(usersList);
+    }, [users, userSearchQuery, userRoleFilter, userDepartmentFilter]);
+
+    // Filter and sort users for balances tab
     useEffect(() => {
         let usersArray = Object.values(users);
 
@@ -283,6 +355,7 @@ export default function HRManagerDashboard() {
             const leaveTypeStats = {};
             const userStats = {};
             const noPayEmployees = [];
+            const employeeDetails = [];
 
             reportRequests.forEach(request => {
                 const user = users[request.userId];
@@ -304,22 +377,57 @@ export default function HRManagerDashboard() {
                 else leaveTypeStats[leaveType].pending++;
             });
 
-            // No Pay Check
+            // Build comprehensive employee details for ALL employees
             Object.values(users).forEach(user => {
-                if (user.leaveBalance) {
-                    const hasNegativeBalance = Object.values(user.leaveBalance).some(balance => balance < 0);
-                    if (hasNegativeBalance) {
-                        noPayEmployees.push({
-                            id: user.uid || user.id,
-                            employeeId: user.employeeNumber || user.id,
-                            name: user.name,
-                            department: user.department || 'N/A',
-                            leaveBalance: user.leaveBalance,
-                            noPayStatus: user.noPayStatus || false,
-                            noPayStartDate: user.noPayStartDate,
-                        });
-                    }
+                const userId = user.uid || user.id;
+                
+                // Get all leave requests for this employee in the date range
+                const employeeRequests = reportRequests.filter(req => req.userId === userId);
+                
+                // Calculate total leave days taken (approved only)
+                const totalLeaveDays = employeeRequests
+                    .filter(req => req.status === 'Approved')
+                    .reduce((sum, req) => sum + (parseFloat(req.leaveUnits) || 0), 0);
+
+                // Get leave balance
+                const leaveBalance = user.leaveBalance || {};
+                
+                // Check for negative balance
+                const hasNegativeBalance = Object.values(leaveBalance).some(balance => balance < 0);
+                if (hasNegativeBalance) {
+                    noPayEmployees.push({
+                        id: userId,
+                        employeeId: user.employeeNumber || userId,
+                        name: user.name,
+                        department: user.department || 'N/A',
+                        leaveBalance: leaveBalance,
+                        noPayStatus: user.noPayStatus || false,
+                        noPayStartDate: user.noPayStartDate,
+                    });
                 }
+
+                // Add to employee details
+                employeeDetails.push({
+                    id: userId,
+                    employeeNumber: user.employeeNumber || 'N/A',
+                    name: user.name || 'Unknown',
+                    department: user.department || 'N/A',
+                    designation: user.designation || 'N/A',
+                    leaveBalance: leaveBalance,
+                    requests: employeeRequests,
+                    totalLeaveDays: totalLeaveDays,
+                    approvedRequests: employeeRequests.filter(r => r.status === 'Approved').length,
+                    pendingRequests: employeeRequests.filter(r => r.status === 'Pending' || r.status === 'Pending HR Approval').length,
+                    rejectedRequests: employeeRequests.filter(r => r.status === 'Rejected').length,
+                });
+            });
+
+            // Sort employee details by department, then by name
+            employeeDetails.sort((a, b) => {
+                if (a.department !== b.department) {
+                    return a.department.localeCompare(b.department);
+                }
+                return a.name.localeCompare(b.name);
             });
 
             const report = {
@@ -332,12 +440,15 @@ export default function HRManagerDashboard() {
                     totalRequests: reportRequests.length,
                     approvedRequests: reportRequests.filter(r => r.status === 'Approved').length,
                     rejectedRequests: reportRequests.filter(r => r.status === 'Rejected').length,
-                    pendingRequests: reportRequests.filter(r => r.status === 'Pending HR Approval').length
+                    pendingRequests: reportRequests.filter(r => r.status === 'Pending HR Approval').length,
+                    totalEmployees: employeeDetails.length,
+                    employeesWithLeave: employeeDetails.filter(e => e.requests.length > 0).length,
                 },
                 departmentStats,
                 leaveTypeStats,
                 requests: reportRequests,
-                noPayEmployees
+                noPayEmployees,
+                employeeDetails
             };
 
             setMonthlyReport(report);
@@ -367,7 +478,7 @@ export default function HRManagerDashboard() {
     const downloadReportAsPDF = () => {
         if (!monthlyReport) return;
         try {
-            const pdf = new jsPDF();
+            const pdf = new jsPDF('landscape'); // Use landscape for wider tables
             const pageWidth = pdf.internal.pageSize.getWidth();
             const pageHeight = pdf.internal.pageSize.getHeight();
             let yPosition = 20;
@@ -385,33 +496,123 @@ export default function HRManagerDashboard() {
             yPosition += 10;
             pdf.setFontSize(12);
             pdf.text(`${monthlyReport.period.start.toLocaleDateString()} - ${monthlyReport.period.end.toLocaleDateString()}`, pageWidth / 2, yPosition, { align: 'center' });
-            yPosition += 20;
+            yPosition += 15;
 
             // Summary
             pdf.setFontSize(14);
             pdf.text('Summary', 20, yPosition);
-            yPosition += 10;
+            yPosition += 8;
             pdf.setFontSize(10);
             pdf.text(`Total Requests: ${monthlyReport.summary.totalRequests}`, 20, yPosition);
-            pdf.text(`Approved: ${monthlyReport.summary.approvedRequests}`, 80, yPosition);
-            pdf.text(`Rejected: ${monthlyReport.summary.rejectedRequests}`, 140, yPosition);
-            yPosition += 20;
+            pdf.text(`Approved: ${monthlyReport.summary.approvedRequests}`, 70, yPosition);
+            pdf.text(`Rejected: ${monthlyReport.summary.rejectedRequests}`, 120, yPosition);
+            pdf.text(`Pending: ${monthlyReport.summary.pendingRequests}`, 170, yPosition);
+            yPosition += 6;
+            pdf.text(`Total Employees: ${monthlyReport.summary.totalEmployees}`, 20, yPosition);
+            pdf.text(`Employees with Leave: ${monthlyReport.summary.employeesWithLeave}`, 70, yPosition);
+            yPosition += 15;
 
-            // Department Stats Table (Simplified for brevity)
+            // Department Stats
             checkAndAddPage(30);
             pdf.setFontSize(14);
             pdf.text('Department Statistics', 20, yPosition);
-            yPosition += 10;
+            yPosition += 8;
+            pdf.setFontSize(9);
             
             Object.entries(monthlyReport.departmentStats).forEach(([dept, stats]) => {
-                checkAndAddPage(10);
-                pdf.setFontSize(10);
-                pdf.text(`${dept}: ${stats.total} Total (${stats.approved} Approved)`, 20, yPosition);
-                yPosition += 7;
+                checkAndAddPage(7);
+                pdf.text(`${dept}: ${stats.total} Total (${stats.approved} Approved, ${stats.rejected} Rejected, ${stats.pending} Pending)`, 20, yPosition);
+                yPosition += 6;
+            });
+            yPosition += 10;
+
+            // Leave Type Stats
+            checkAndAddPage(30);
+            pdf.setFontSize(14);
+            pdf.text('Leave Type Statistics', 20, yPosition);
+            yPosition += 8;
+            pdf.setFontSize(9);
+            
+            Object.entries(monthlyReport.leaveTypeStats).forEach(([type, stats]) => {
+                checkAndAddPage(7);
+                pdf.text(`${type}: ${stats.total} Total (${stats.approved} Approved, ${stats.rejected} Rejected, ${stats.pending} Pending)`, 20, yPosition);
+                yPosition += 6;
+            });
+            yPosition += 10;
+
+            // All Employees Table
+            checkAndAddPage(40);
+            pdf.setFontSize(14);
+            pdf.text('All Employees Leave Report', 20, yPosition);
+            yPosition += 8;
+            
+            // Table headers
+            pdf.setFontSize(8);
+            pdf.setFont(undefined, 'bold');
+            const colX = [20, 35, 80, 120, 155, 175, 195, 215, 235, 255];
+            pdf.text('Emp#', colX[0], yPosition);
+            pdf.text('Name', colX[1], yPosition);
+            pdf.text('Department', colX[2], yPosition);
+            pdf.text('Designation', colX[3], yPosition);
+            pdf.text('Days', colX[4], yPosition);
+            pdf.text('Req', colX[5], yPosition);
+            pdf.text('Annual', colX[6], yPosition);
+            pdf.text('Casual', colX[7], yPosition);
+            pdf.text('Medical', colX[8], yPosition);
+            yPosition += 6;
+            pdf.setFont(undefined, 'normal');
+
+            // Table rows
+            monthlyReport.employeeDetails.forEach((emp) => {
+                checkAndAddPage(6);
+                
+                pdf.text(emp.employeeNumber.substring(0, 10), colX[0], yPosition);
+                pdf.text(emp.name.substring(0, 30), colX[1], yPosition);
+                pdf.text(emp.department.substring(0, 25), colX[2], yPosition);
+                pdf.text(emp.designation.substring(0, 20), colX[3], yPosition);
+                pdf.text(emp.totalLeaveDays > 0 ? emp.totalLeaveDays.toFixed(1) : '-', colX[4], yPosition);
+                
+                const reqText = emp.requests.length > 0 ?
+                    `${emp.approvedRequests}/${emp.pendingRequests}/${emp.rejectedRequests}` : '-';
+                pdf.text(reqText, colX[5], yPosition);
+                
+                pdf.text(emp.leaveBalance['Annual Leave'] !== undefined ?
+                    emp.leaveBalance['Annual Leave'].toFixed(1) : '-', colX[6], yPosition);
+                pdf.text(emp.leaveBalance['Casual Leave'] !== undefined ?
+                    emp.leaveBalance['Casual Leave'].toFixed(1) : '-', colX[7], yPosition);
+                pdf.text(emp.leaveBalance['Medical Leave'] !== undefined ?
+                    emp.leaveBalance['Medical Leave'].toFixed(1) : '-', colX[8], yPosition);
+                
+                yPosition += 5;
             });
 
+            yPosition += 10;
+
+            // No Pay Employees
+            if (monthlyReport.noPayEmployees.length > 0) {
+                checkAndAddPage(30);
+                pdf.setFontSize(14);
+                pdf.setTextColor(255, 0, 0);
+                pdf.text('Employees with Negative Balance', 20, yPosition);
+                pdf.setTextColor(0, 0, 0);
+                yPosition += 8;
+                pdf.setFontSize(9);
+                
+                monthlyReport.noPayEmployees.forEach((emp) => {
+                    checkAndAddPage(10);
+                    const negBalances = Object.entries(emp.leaveBalance)
+                        .filter(([_, balance]) => balance < 0)
+                        .map(([type, balance]) => `${type}: ${balance.toFixed(1)}`)
+                        .join(', ');
+                    pdf.text(`${emp.name} (${emp.employeeId}) - ${emp.department}`, 20, yPosition);
+                    yPosition += 5;
+                    pdf.text(`  ${negBalances}`, 20, yPosition);
+                    yPosition += 7;
+                });
+            }
+
             // Save
-            pdf.save(`Leave_Report_${monthlyReport.period.month}.pdf`);
+            pdf.save(`Leave_Report_${monthlyReport.period.month.replace(/\s+/g, '_')}.pdf`);
             setMessage({ type: 'success', text: 'PDF downloaded successfully.' });
 
         } catch (error) {
@@ -565,6 +766,147 @@ export default function HRManagerDashboard() {
         }
     };
 
+    // Add User Handlers
+    const handleAddUserChange = (e) => {
+        const { name, value } = e.target;
+        setNewUser(prev => ({
+            ...prev,
+            [name]: value
+        }));
+    };
+
+    const handleAddUserSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        setSuccess('');
+
+        try {
+            await signup(
+                newUser.name,
+                newUser.email,
+                newUser.password,
+                newUser.department,
+                newUser.managerId || null,
+                newUser.employeeNumber || null,
+                newUser.gender || null,
+                newUser.designation || null,
+                newUser.birthday || null,
+                newUser.employeeStatus || 'probation',
+                newUser.joinedDate || null
+            );
+            setSuccess('User added successfully!');
+            // Reset form
+            setNewUser({
+                name: '',
+                email: '',
+                password: '',
+                department: '',
+                managerId: '',
+                employeeNumber: '',
+                gender: '',
+                designation: '',
+                birthday: '',
+                employeeStatus: 'probation',
+                joinedDate: '',
+                role: 'Employee'
+            });
+            // Close the form after a short delay
+            setTimeout(() => {
+                setShowAddUserForm(false);
+                setSuccess('');
+            }, 1500);
+        } catch (err) {
+            setError(err.message || 'Failed to add user');
+        }
+    };
+
+    // User Management Handlers
+    const handleEditUser = (user) => {
+        setEditingUserData({
+            uid: user.uid || user.id,
+            name: user.name || '',
+            email: user.email || '',
+            department: user.department || '',
+            designation: user.designation || '',
+            employeeNumber: user.employeeNumber || '',
+            gender: user.gender || '',
+            managerId: user.managerId || '',
+            employeeStatus: user.employeeStatus || 'probation',
+            joinedDate: user.joinedDate ? new Date(user.joinedDate).toISOString().split('T')[0] : '',
+            birthday: user.personalDetails?.dob || ''
+        });
+        setShowEditUserModal(true);
+    };
+
+    const handleEditUserChange = (e) => {
+        const { name, value } = e.target;
+        setEditingUserData(prev => ({
+            ...prev,
+            [name]: value
+        }));
+    };
+
+    const handleSaveUserEdit = async (e) => {
+        e.preventDefault();
+        setError('');
+        setSuccess('');
+
+        try {
+            const userRef = doc(db, 'users', editingUserData.uid);
+            const updateData = {
+                name: editingUserData.name,
+                department: editingUserData.department,
+                designation: editingUserData.designation,
+                employeeNumber: editingUserData.employeeNumber,
+                gender: editingUserData.gender,
+                managerId: editingUserData.managerId || null,
+                employeeStatus: editingUserData.employeeStatus
+            };
+
+            // Update joined date if changed
+            if (editingUserData.joinedDate) {
+                const joinedDateObj = new Date(editingUserData.joinedDate);
+                const nextEvaluationDate = new Date(joinedDateObj);
+                nextEvaluationDate.setMonth(nextEvaluationDate.getMonth() + 3);
+                updateData.joinedDate = joinedDateObj.toISOString();
+                updateData.nextEvaluationDate = nextEvaluationDate.toISOString();
+            }
+
+            // Update birthday in personalDetails
+            if (editingUserData.birthday) {
+                const currentUser = users[editingUserData.uid];
+                updateData.personalDetails = {
+                    ...currentUser.personalDetails,
+                    dob: editingUserData.birthday
+                };
+            }
+
+            await updateDoc(userRef, updateData);
+            setSuccess('User updated successfully!');
+            setShowEditUserModal(false);
+            setEditingUserData(null);
+            setTimeout(() => setSuccess(''), 3000);
+        } catch (err) {
+            setError(err.message || 'Failed to update user');
+        }
+    };
+
+    const handleDeleteUser = async (userId) => {
+        try {
+            const userRef = doc(db, 'users', userId);
+            await updateDoc(userRef, {
+                deleted: true,
+                deletedAt: new Date(),
+                deletedBy: userData?.uid || 'hr-manager'
+            });
+            setSuccess('User deleted successfully');
+            setShowDeleteConfirm(null);
+            setTimeout(() => setSuccess(''), 3000);
+        } catch (error) {
+            console.error('Error deleting user:', error);
+            setError('Failed to delete user: ' + error.message);
+        }
+    };
 
     const pendingFinalHRRequests = allRequests.filter(r => r.status === 'Pending HR Approval' && r.hrManagerApproval !== 'Approved');
 
@@ -583,7 +925,7 @@ export default function HRManagerDashboard() {
             {/* Navigation Tabs */}
             <div className="border-b border-gray-700">
                 <nav className="-mb-px flex space-x-8">
-                    {['requests', 'balances', 'history', 'reports', 'manual', 'policy'].map(tab => (
+                    {['requests', 'balances', 'history', 'reports', 'manual', 'users', 'policy'].map(tab => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
@@ -715,14 +1057,195 @@ export default function HRManagerDashboard() {
                                     <h3 className="text-xl text-slate-200">Report: {monthlyReport.period.month}</h3>
                                     <button onClick={downloadReportAsPDF} className="bg-red-600 text-white px-3 py-1 rounded">Download PDF</button>
                                 </div>
-                                <div className="grid grid-cols-4 gap-4 mb-8">
-                                    <div className="bg-blue-900/30 p-4 rounded text-blue-400 font-bold text-xl">{monthlyReport.summary.totalRequests} <span className="text-sm font-normal text-slate-400">Total</span></div>
-                                    <div className="bg-green-900/30 p-4 rounded text-green-400 font-bold text-xl">{monthlyReport.summary.approvedRequests} <span className="text-sm font-normal text-slate-400">Approved</span></div>
-                                    <div className="bg-red-900/30 p-4 rounded text-red-400 font-bold text-xl">{monthlyReport.summary.rejectedRequests} <span className="text-sm font-normal text-slate-400">Rejected</span></div>
-                                    <div className="bg-yellow-900/30 p-4 rounded text-yellow-400 font-bold text-xl">{monthlyReport.summary.pendingRequests} <span className="text-sm font-normal text-slate-400">Pending</span></div>
+                                
+                                {/* Summary Cards */}
+                                <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-8">
+                                    <div className="bg-blue-900/30 p-4 rounded text-blue-400 font-bold text-xl">
+                                        {monthlyReport.summary.totalRequests}
+                                        <span className="text-sm font-normal text-slate-400 block">Total Requests</span>
+                                    </div>
+                                    <div className="bg-green-900/30 p-4 rounded text-green-400 font-bold text-xl">
+                                        {monthlyReport.summary.approvedRequests}
+                                        <span className="text-sm font-normal text-slate-400 block">Approved</span>
+                                    </div>
+                                    <div className="bg-red-900/30 p-4 rounded text-red-400 font-bold text-xl">
+                                        {monthlyReport.summary.rejectedRequests}
+                                        <span className="text-sm font-normal text-slate-400 block">Rejected</span>
+                                    </div>
+                                    <div className="bg-yellow-900/30 p-4 rounded text-yellow-400 font-bold text-xl">
+                                        {monthlyReport.summary.pendingRequests}
+                                        <span className="text-sm font-normal text-slate-400 block">Pending</span>
+                                    </div>
+                                    <div className="bg-purple-900/30 p-4 rounded text-purple-400 font-bold text-xl">
+                                        {monthlyReport.summary.totalEmployees}
+                                        <span className="text-sm font-normal text-slate-400 block">Total Employees</span>
+                                    </div>
+                                    <div className="bg-indigo-900/30 p-4 rounded text-indigo-400 font-bold text-xl">
+                                        {monthlyReport.summary.employeesWithLeave}
+                                        <span className="text-sm font-normal text-slate-400 block">On Leave</span>
+                                    </div>
                                 </div>
-                                {/* Tables would go here - simplified for length */}
-                                <div className="text-slate-400 italic">Detailed tables available in PDF export.</div>
+
+                                {/* Department Statistics */}
+                                <div className="mb-8">
+                                    <h4 className="text-lg font-semibold text-slate-200 mb-4">Department Statistics</h4>
+                                    <div className="bg-muted rounded-lg overflow-hidden">
+                                        <table className="min-w-full divide-y divide-gray-700">
+                                            <thead className="bg-card">
+                                                <tr>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Department</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Total</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Approved</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Rejected</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Pending</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-700">
+                                                {Object.entries(monthlyReport.departmentStats).map(([dept, stats]) => (
+                                                    <tr key={dept}>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-200">{dept}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">{stats.total}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-green-400">{stats.approved}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-red-400">{stats.rejected}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-yellow-400">{stats.pending}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                {/* Leave Type Statistics */}
+                                <div className="mb-8">
+                                    <h4 className="text-lg font-semibold text-slate-200 mb-4">Leave Type Statistics</h4>
+                                    <div className="bg-muted rounded-lg overflow-hidden">
+                                        <table className="min-w-full divide-y divide-gray-700">
+                                            <thead className="bg-card">
+                                                <tr>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Leave Type</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Total</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Approved</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Rejected</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Pending</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-700">
+                                                {Object.entries(monthlyReport.leaveTypeStats).map(([type, stats]) => (
+                                                    <tr key={type}>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-200">{type}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">{stats.total}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-green-400">{stats.approved}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-red-400">{stats.rejected}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-yellow-400">{stats.pending}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                {/* All Employees Leave Report */}
+                                <div className="mb-8">
+                                    <h4 className="text-lg font-semibold text-slate-200 mb-4">All Employees Leave Report</h4>
+                                    <div className="bg-muted rounded-lg overflow-hidden">
+                                        <div className="overflow-x-auto">
+                                            <table className="min-w-full divide-y divide-gray-700">
+                                                <thead className="bg-card">
+                                                    <tr>
+                                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Emp #</th>
+                                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Name</th>
+                                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Department</th>
+                                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Designation</th>
+                                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Leave Days</th>
+                                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Requests</th>
+                                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Annual</th>
+                                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Casual</th>
+                                                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Medical</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-700">
+                                                    {monthlyReport.employeeDetails.map((employee) => (
+                                                        <tr key={employee.id} className={employee.requests.length > 0 ? 'bg-blue-900/10' : ''}>
+                                                            <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-300">{employee.employeeNumber}</td>
+                                                            <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-200">{employee.name}</td>
+                                                            <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-300">{employee.department}</td>
+                                                            <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-300">{employee.designation}</td>
+                                                            <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-blue-400">
+                                                                {employee.totalLeaveDays > 0 ? employee.totalLeaveDays.toFixed(1) : '-'}
+                                                            </td>
+                                                            <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-300">
+                                                                {employee.requests.length > 0 ? (
+                                                                    <span>
+                                                                        <span className="text-green-400">{employee.approvedRequests}</span>
+                                                                        {employee.pendingRequests > 0 && <span className="text-yellow-400"> / {employee.pendingRequests}P</span>}
+                                                                        {employee.rejectedRequests > 0 && <span className="text-red-400"> / {employee.rejectedRequests}R</span>}
+                                                                    </span>
+                                                                ) : '-'}
+                                                            </td>
+                                                            <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-300">
+                                                                {employee.leaveBalance['Annual Leave'] !== undefined ?
+                                                                    <span className={employee.leaveBalance['Annual Leave'] < 0 ? 'text-red-400 font-semibold' : ''}>
+                                                                        {employee.leaveBalance['Annual Leave'].toFixed(1)}
+                                                                    </span> : '-'}
+                                                            </td>
+                                                            <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-300">
+                                                                {employee.leaveBalance['Casual Leave'] !== undefined ?
+                                                                    <span className={employee.leaveBalance['Casual Leave'] < 0 ? 'text-red-400 font-semibold' : ''}>
+                                                                        {employee.leaveBalance['Casual Leave'].toFixed(1)}
+                                                                    </span> : '-'}
+                                                            </td>
+                                                            <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-300">
+                                                                {employee.leaveBalance['Medical Leave'] !== undefined ?
+                                                                    <span className={employee.leaveBalance['Medical Leave'] < 0 ? 'text-red-400 font-semibold' : ''}>
+                                                                        {employee.leaveBalance['Medical Leave'].toFixed(1)}
+                                                                    </span> : '-'}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    <div className="mt-2 text-xs text-slate-400">
+                                        <p>* Highlighted rows indicate employees with leave in the selected period</p>
+                                        <p>* Leave Days: Total approved leave days in the period | Requests: Approved / Pending / Rejected</p>
+                                        <p>* Balance columns show current leave balance (negative values in red)</p>
+                                    </div>
+                                </div>
+
+                                {/* No Pay Employees Warning */}
+                                {monthlyReport.noPayEmployees.length > 0 && (
+                                    <div className="mb-8">
+                                        <h4 className="text-lg font-semibold text-red-400 mb-4">⚠️ Employees with Negative Balance</h4>
+                                        <div className="bg-red-900/20 rounded-lg overflow-hidden border border-red-800">
+                                            <table className="min-w-full divide-y divide-red-800">
+                                                <thead className="bg-red-900/30">
+                                                    <tr>
+                                                        <th className="px-6 py-3 text-left text-xs font-medium text-red-300 uppercase tracking-wider">Employee</th>
+                                                        <th className="px-6 py-3 text-left text-xs font-medium text-red-300 uppercase tracking-wider">Department</th>
+                                                        <th className="px-6 py-3 text-left text-xs font-medium text-red-300 uppercase tracking-wider">Negative Balances</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-red-800">
+                                                    {monthlyReport.noPayEmployees.map((emp) => (
+                                                        <tr key={emp.id}>
+                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-200">
+                                                                {emp.name} ({emp.employeeId})
+                                                            </td>
+                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">{emp.department}</td>
+                                                            <td className="px-6 py-4 text-sm text-red-400">
+                                                                {Object.entries(emp.leaveBalance)
+                                                                    .filter(([_, balance]) => balance < 0)
+                                                                    .map(([type, balance]) => `${type}: ${balance.toFixed(1)}`)
+                                                                    .join(', ')}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
@@ -759,7 +1282,182 @@ export default function HRManagerDashboard() {
                     </div>
                 )}
 
-                {/* 6. POLICY TAB */}
+                {/* 6. USERS TAB */}
+                {activeTab === 'users' && (
+                    <div className="p-6">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-semibold text-slate-200">User Management</h3>
+                            <button
+                                onClick={() => setShowAddUserForm(true)}
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out"
+                            >
+                                Add New User
+                            </button>
+                        </div>
+
+                        {error && (
+                            <div className="mb-4 p-3 bg-red-900/30 text-red-300 rounded-md text-sm">
+                                {error}
+                            </div>
+                        )}
+                        
+                        {success && (
+                            <div className="mb-4 p-3 bg-green-900/30 text-green-300 rounded-md text-sm">
+                                {success}
+                            </div>
+                        )}
+
+                        {/* Search and Filters */}
+                        <div className="mb-6 space-y-4">
+                            {/* Search Bar */}
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    placeholder="Search by name, email, or employee number..."
+                                    value={userSearchQuery}
+                                    onChange={(e) => setUserSearchQuery(e.target.value)}
+                                    className="w-full pl-10 pr-4 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                />
+                                <svg className="absolute left-3 top-2.5 h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                            </div>
+
+                            {/* Filter Row */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                {/* Role Filter */}
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Filter by Role</label>
+                                    <select
+                                        value={userRoleFilter}
+                                        onChange={(e) => setUserRoleFilter(e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    >
+                                        <option value="">All Roles</option>
+                                        <option value="Employee">Employee</option>
+                                        <option value="Admin">Admin</option>
+                                        <option value="CEO">CEO</option>
+                                        <option value="Manager HR">Manager HR</option>
+                                        <option value="Finance Manager">Finance Manager</option>
+                                        <option value="Manager IT">Manager IT</option>
+                                    </select>
+                                </div>
+
+                                {/* Department Filter */}
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Filter by Department</label>
+                                    <select
+                                        value={userDepartmentFilter}
+                                        onChange={(e) => setUserDepartmentFilter(e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    >
+                                        <option value="">All Departments</option>
+                                        <option value="Human Resources">Human Resources</option>
+                                        <option value="Finance">Finance</option>
+                                        <option value="Academic">Academic</option>
+                                        <option value="Marketing">Marketing</option>
+                                        <option value="Administration">Administration</option>
+                                        <option value="IT">IT</option>
+                                        <option value="Operations">Operations</option>
+                                        <option value="Registrar">Registrar</option>
+                                        <option value="Student Support">Student Support</option>
+                                    </select>
+                                </div>
+
+                                {/* Clear Filters */}
+                                <div className="flex items-end">
+                                    <button
+                                        onClick={() => {
+                                            setUserSearchQuery('');
+                                            setUserRoleFilter('');
+                                            setUserDepartmentFilter('');
+                                        }}
+                                        className="w-full px-3 py-2 border border-gray-600 text-slate-300 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 transition duration-150 ease-in-out"
+                                    >
+                                        Clear Filters
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Results Count */}
+                            <div className="text-sm text-slate-400">
+                                Showing {filteredUsersList.length} of {Object.keys(users).length} users
+                            </div>
+                        </div>
+
+                        {/* Users Table */}
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-gray-700">
+                                <thead className="bg-muted">
+                                    <tr>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Actions</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Emp #</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Name</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Email</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Role</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Department</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="bg-card divide-y divide-gray-700">
+                                    {filteredUsersList.filter(u => !u.deleted).map(user => (
+                                        <tr key={user.uid || user.id} className="hover:bg-muted">
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <div className="flex space-x-2">
+                                                    <button
+                                                        onClick={() => handleEditUser(user)}
+                                                        className="text-blue-400 hover:text-blue-300 text-sm"
+                                                        title="Edit User"
+                                                    >
+                                                        Edit
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setShowDeleteConfirm(user)}
+                                                        className="text-red-400 hover:text-red-300 text-sm"
+                                                        title="Delete User"
+                                                    >
+                                                        Delete
+                                                    </button>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
+                                                {user.employeeNumber || '-'}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-200">
+                                                {user.name}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
+                                                {user.email}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
+                                                {user.role}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
+                                                {user.department}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                                    user.employeeStatus === 'permanent' ? 'bg-green-900/30 text-green-300' :
+                                                    user.employeeStatus === 'probation' ? 'bg-yellow-900/30 text-yellow-300' :
+                                                    'bg-blue-900/30 text-blue-300'
+                                                }`}>
+                                                    {user.employeeStatus || 'probation'}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {filteredUsersList.filter(u => !u.deleted).length === 0 && (
+                                <div className="text-center py-8 text-slate-400">
+                                    No users found matching your criteria.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* 7. POLICY TAB */}
                 {activeTab === 'policy' && (
                     <div className="p-6 space-y-6">
                         <LeavePolicyReference />
@@ -791,6 +1489,431 @@ export default function HRManagerDashboard() {
                         <div className="mt-6 flex justify-end space-x-3">
                             <button onClick={() => setShowEditBalanceModal(false)} className="text-slate-400">Cancel</button>
                             <button onClick={saveBalanceChanges} className="bg-blue-600 text-white px-4 py-2 rounded">Save</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Add User Modal */}
+            {showAddUserForm && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col mx-2 sm:mx-4">
+                        <div className="p-6 overflow-y-auto flex-1">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-medium text-slate-200">Add New User</h3>
+                                <button
+                                    onClick={() => {
+                                        setShowAddUserForm(false);
+                                        setError('');
+                                        setSuccess('');
+                                    }}
+                                    className="text-slate-400 hover:text-slate-200"
+                                >
+                                    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            {error && (
+                                <div className="mb-4 p-3 bg-red-900/30 text-red-300 rounded-md text-sm">
+                                    {error}
+                                </div>
+                            )}
+                            
+                            {success && (
+                                <div className="mb-4 p-3 bg-green-900/30 text-green-300 rounded-md text-sm">
+                                    {success}
+                                </div>
+                            )}
+                            
+                            <form onSubmit={handleAddUserSubmit}>
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Full Name *</label>
+                                    <input
+                                        type="text"
+                                        name="name"
+                                        value={newUser.name}
+                                        onChange={handleAddUserChange}
+                                        required
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        placeholder="Enter full name"
+                                    />
+                                </div>
+                                
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Email Address *</label>
+                                    <input
+                                        type="email"
+                                        name="email"
+                                        value={newUser.email}
+                                        onChange={handleAddUserChange}
+                                        required
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        placeholder="Enter email address"
+                                    />
+                                </div>
+                                
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Password *</label>
+                                    <input
+                                        type="password"
+                                        name="password"
+                                        value={newUser.password}
+                                        onChange={handleAddUserChange}
+                                        required
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        placeholder="Enter password"
+                                    />
+                                </div>
+                                
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Department *</label>
+                                    <select
+                                        name="department"
+                                        value={newUser.department}
+                                        onChange={handleAddUserChange}
+                                        required
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    >
+                                        <option value="">Select Department</option>
+                                        <option value="Human Resources">Human Resources</option>
+                                        <option value="Finance">Finance</option>
+                                        <option value="Academic">Academic</option>
+                                        <option value="Marketing">Marketing</option>
+                                        <option value="Administration">Administration</option>
+                                        <option value="IT">IT</option>
+                                        <option value="Operations">Operations</option>
+                                        <option value="Registrar">Registrar</option>
+                                        <option value="Student Support">Student Support</option>
+                                    </select>
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Employee Number</label>
+                                    <input
+                                        type="text"
+                                        name="employeeNumber"
+                                        value={newUser.employeeNumber}
+                                        onChange={handleAddUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        placeholder="Enter employee number"
+                                    />
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Designation</label>
+                                    <input
+                                        type="text"
+                                        name="designation"
+                                        value={newUser.designation}
+                                        onChange={handleAddUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        placeholder="Enter designation"
+                                    />
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Gender</label>
+                                    <select
+                                        name="gender"
+                                        value={newUser.gender}
+                                        onChange={handleAddUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    >
+                                        <option value="">Select Gender</option>
+                                        <option value="Male">Male</option>
+                                        <option value="Female">Female</option>
+                                        <option value="Other">Other</option>
+                                    </select>
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Manager</label>
+                                    <select
+                                        name="managerId"
+                                        value={newUser.managerId}
+                                        onChange={handleAddUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    >
+                                        <option value="">Select Manager (Optional)</option>
+                                        {Object.values(users).filter(u => u.role !== 'Employee').map(manager => (
+                                            <option key={manager.uid || manager.id} value={manager.uid || manager.id}>
+                                                {manager.name} ({manager.role})
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Employee Status</label>
+                                    <select
+                                        name="employeeStatus"
+                                        value={newUser.employeeStatus}
+                                        onChange={handleAddUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    >
+                                        <option value="probation">Probation</option>
+                                        <option value="permanent">Permanent</option>
+                                        <option value="contract">Contract</option>
+                                    </select>
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Joined Date</label>
+                                    <input
+                                        type="date"
+                                        name="joinedDate"
+                                        value={newUser.joinedDate}
+                                        onChange={handleAddUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    />
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Birthday</label>
+                                    <input
+                                        type="date"
+                                        name="birthday"
+                                        value={newUser.birthday}
+                                        onChange={handleAddUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    />
+                                </div>
+                                
+                                <div className="flex justify-end space-x-3 mt-6">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setShowAddUserForm(false);
+                                            setError('');
+                                            setSuccess('');
+                                        }}
+                                        className="px-4 py-2 border border-gray-600 text-slate-300 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                        Add User
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Edit User Modal */}
+            {showEditUserModal && editingUserData && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col mx-2 sm:mx-4">
+                        <div className="p-6 overflow-y-auto flex-1">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-medium text-slate-200">Edit User</h3>
+                                <button
+                                    onClick={() => {
+                                        setShowEditUserModal(false);
+                                        setEditingUserData(null);
+                                        setError('');
+                                    }}
+                                    className="text-slate-400 hover:text-slate-200"
+                                >
+                                    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            {error && (
+                                <div className="mb-4 p-3 bg-red-900/30 text-red-300 rounded-md text-sm">
+                                    {error}
+                                </div>
+                            )}
+                            
+                            <form onSubmit={handleSaveUserEdit}>
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Full Name *</label>
+                                    <input
+                                        type="text"
+                                        name="name"
+                                        value={editingUserData.name}
+                                        onChange={handleEditUserChange}
+                                        required
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    />
+                                </div>
+                                
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Email (Read-only)</label>
+                                    <input
+                                        type="email"
+                                        value={editingUserData.email}
+                                        disabled
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm text-slate-400 bg-muted cursor-not-allowed"
+                                    />
+                                </div>
+                                
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Department *</label>
+                                    <select
+                                        name="department"
+                                        value={editingUserData.department}
+                                        onChange={handleEditUserChange}
+                                        required
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    >
+                                        <option value="">Select Department</option>
+                                        <option value="Human Resources">Human Resources</option>
+                                        <option value="Finance">Finance</option>
+                                        <option value="Academic">Academic</option>
+                                        <option value="Marketing">Marketing</option>
+                                        <option value="Administration">Administration</option>
+                                        <option value="IT">IT</option>
+                                        <option value="Operations">Operations</option>
+                                        <option value="Registrar">Registrar</option>
+                                        <option value="Student Support">Student Support</option>
+                                    </select>
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Employee Number</label>
+                                    <input
+                                        type="text"
+                                        name="employeeNumber"
+                                        value={editingUserData.employeeNumber}
+                                        onChange={handleEditUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    />
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Designation</label>
+                                    <input
+                                        type="text"
+                                        name="designation"
+                                        value={editingUserData.designation}
+                                        onChange={handleEditUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    />
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Gender</label>
+                                    <select
+                                        name="gender"
+                                        value={editingUserData.gender}
+                                        onChange={handleEditUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    >
+                                        <option value="">Select Gender</option>
+                                        <option value="Male">Male</option>
+                                        <option value="Female">Female</option>
+                                        <option value="Other">Other</option>
+                                    </select>
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Manager</label>
+                                    <select
+                                        name="managerId"
+                                        value={editingUserData.managerId}
+                                        onChange={handleEditUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    >
+                                        <option value="">Select Manager (Optional)</option>
+                                        {Object.values(users).filter(u => u.role !== 'Employee' && (u.uid || u.id) !== editingUserData.uid).map(manager => (
+                                            <option key={manager.uid || manager.id} value={manager.uid || manager.id}>
+                                                {manager.name} ({manager.role})
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Employee Status</label>
+                                    <select
+                                        name="employeeStatus"
+                                        value={editingUserData.employeeStatus}
+                                        onChange={handleEditUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    >
+                                        <option value="probation">Probation</option>
+                                        <option value="permanent">Permanent</option>
+                                        <option value="contract">Contract</option>
+                                    </select>
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Joined Date</label>
+                                    <input
+                                        type="date"
+                                        name="joinedDate"
+                                        value={editingUserData.joinedDate}
+                                        onChange={handleEditUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    />
+                                </div>
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Birthday</label>
+                                    <input
+                                        type="date"
+                                        name="birthday"
+                                        value={editingUserData.birthday}
+                                        onChange={handleEditUserChange}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    />
+                                </div>
+                                
+                                <div className="flex justify-end space-x-3 mt-6">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setShowEditUserModal(false);
+                                            setEditingUserData(null);
+                                            setError('');
+                                        }}
+                                        className="px-4 py-2 border border-gray-600 text-slate-300 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                        Save Changes
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Delete Confirmation Dialog */}
+            {showDeleteConfirm && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md p-6">
+                        <h3 className="text-lg font-medium text-slate-200 mb-4">Confirm Delete</h3>
+                        <p className="text-slate-300 mb-6">
+                            Are you sure you want to delete user <strong>{showDeleteConfirm.name}</strong>? This action will mark the user as deleted.
+                        </p>
+                        <div className="flex justify-end space-x-3">
+                            <button
+                                onClick={() => setShowDeleteConfirm(null)}
+                                className="px-4 py-2 border border-gray-600 text-slate-300 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => handleDeleteUser(showDeleteConfirm.uid || showDeleteConfirm.id)}
+                                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                            >
+                                Delete User
+                            </button>
                         </div>
                     </div>
                 </div>

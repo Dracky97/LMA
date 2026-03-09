@@ -19,12 +19,20 @@ export default function MyLeaveSection() {
 
     const q = query(collection(db, "leaveRequests"), where("userId", "==", userData.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-        const requests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        requests.sort((a, b) => {
-            // Handle case where appliedOn might be undefined
-            if (!a.appliedOn || !b.appliedOn) return 0;
-            return b.appliedOn.toDate() - a.appliedOn.toDate();
-        });
+        const currentYear = new Date().getFullYear();
+        const requests = snapshot.docs
+            .map(doc => ({ id: doc.id, ...doc.data() }))
+            .filter(request => {
+                // Filter to show only current year's leave requests (Jan 1 - Dec 31)
+                if (!request.startDate) return false;
+                const startDate = new Date(request.startDate);
+                return startDate.getFullYear() === currentYear;
+            })
+            .sort((a, b) => {
+                // Handle case where appliedOn might be undefined
+                if (!a.appliedOn || !b.appliedOn) return 0;
+                return b.appliedOn.toDate() - a.appliedOn.toDate();
+            });
         setLeaveRequests(requests);
     }, (error) => {
         console.error("Error fetching leave requests:", error);

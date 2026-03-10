@@ -25,8 +25,20 @@ export default function MyLeaveSection() {
             .filter(request => {
                 // Filter to show only current year's leave requests (Jan 1 - Dec 31)
                 if (!request.startDate) return false;
-                const startDate = new Date(request.startDate);
-                return startDate.getFullYear() === currentYear;
+                
+                try {
+                  // Handle both Firestore Timestamp and string dates
+                  let startDate;
+                  if (request.startDate.toDate) {
+                    startDate = request.startDate.toDate();
+                  } else {
+                    startDate = new Date(request.startDate);
+                  }
+                  return startDate.getFullYear() === currentYear;
+                } catch (error) {
+                  console.error("Error parsing startDate for request", request.id, error);
+                  return false;
+                }
             })
             .sort((a, b) => {
                 // Handle case where appliedOn might be undefined

@@ -67,7 +67,7 @@ export default function AuthPage({ title }) {
       <div className="text-center mb-8">
         <img
           className="mx-auto h-24 w-auto"
-          src="/img_1767678220205.png"
+          src="/AIBS-Logo.png"
           alt="Company Logo"
         />
         <h2 className="mt-6 text-3xl font-bold tracking-tight text-slate-200">{title}</h2>

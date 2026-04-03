@@ -58,6 +58,16 @@ service cloud.firestore {
                              request.auth.uid == resource.data.managerId;
     }
     
+    // Holidays collection rules
+    match /holidays/{holidayId} {
+      // All authenticated users can read holidays
+      allow read: if request.auth != null;
+      
+      // Only Admins and HR Managers can create, update, delete holidays
+      allow create, update, delete: if request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'Manager HR'];
+    }
+
     // Allow reading other collections that might be needed
     match /{document=**} {
       // Fallback rule for authenticated users to read other documents

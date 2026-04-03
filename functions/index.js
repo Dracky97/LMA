@@ -11,6 +11,56 @@ admin.initializeApp();
 const db = admin.firestore();
 
 // -----------------------------------------------------------
+// SMTP TRANSPORTER FACTORY
+// Creates a new transporter and validates env vars are present
+// -----------------------------------------------------------
+
+function createTransporter() {
+    const emailUser = process.env.EMAIL_USER;
+    const emailPass = process.env.EMAIL_PASS;
+
+    if (!emailUser || !emailPass) {
+        console.error(
+            "[EMAIL CONFIG ERROR] Missing SMTP credentials. " +
+            `EMAIL_USER is ${emailUser ? "SET" : "NOT SET"}, ` +
+            `EMAIL_PASS is ${emailPass ? "SET" : "NOT SET"}. ` +
+            "Set them via: firebase functions:secrets:set EMAIL_USER EMAIL_PASS"
+        );
+        return null;
+    }
+
+    return nodemailer.createTransport({
+        host: "mail.aibs.edu.lk",
+        port: 465,
+        secure: true,
+        auth: {
+            user: emailUser,
+            pass: emailPass
+        }
+    });
+}
+
+// -----------------------------------------------------------
+// SAFE DATE FORMATTER
+// Handles both Firestore Timestamps and ISO strings
+// -----------------------------------------------------------
+
+function formatDate(dateField) {
+    if (!dateField) return "N/A";
+    // Firestore Timestamp object has _seconds
+    if (dateField._seconds !== undefined) {
+        return new Date(dateField._seconds * 1000).toLocaleDateString();
+    }
+    // Firestore Timestamp object from admin SDK has seconds (no underscore)
+    if (dateField.seconds !== undefined) {
+        return new Date(dateField.seconds * 1000).toLocaleDateString();
+    }
+    // Plain ISO string or Date
+    const d = new Date(dateField);
+    return isNaN(d.getTime()) ? String(dateField) : d.toLocaleDateString();
+}
+
+// -----------------------------------------------------------
 // EMAIL TEMPLATES
 // -----------------------------------------------------------
 
@@ -122,6 +172,54 @@ const evaluationReminderTemplate = (recipientType, userData, hrData) => {
 };
 
 // -----------------------------------------------------------
+// HELPER: Send evaluation reminder email
+// FIX: This function was called in sendPerformanceEvaluationReminders
+//      but was never defined — causing a ReferenceError crash.
+// -----------------------------------------------------------
+
+async function sendEvaluationReminder(userData, recipientType, hrData = null) {
+    const transporter = createTransporter();
+    if (!transporter) {
+        console.error("[sendEvaluationReminder] Cannot send email: transporter creation failed (missing credentials).");
+        return;
+    }
+
+    const recipientEmail = recipientType === 'employee' ? userData.email : hrData && hrData.email;
+    const recipientName = recipientType === 'employee' ? userData.name : hrData && hrData.name;
+
+    if (!recipientEmail) {
+        console.error(
+            `[sendEvaluationReminder] No email address found for ${recipientType}. ` +
+            `userData.name=${userData.name}, hrData=${hrData ? hrData.name : 'N/A'}`
+        );
+        return;
+    }
+
+    const htmlBody = evaluationReminderTemplate(recipientType, userData, hrData);
+    if (!htmlBody) {
+        console.error(`[sendEvaluationReminder] Template returned empty for recipientType="${recipientType}"`);
+        return;
+    }
+
+    const mailOptions = {
+        from: '"HRMS Portal" <hrms@aibs.edu.lk>',
+        to: recipientEmail,
+        subject: `Performance Evaluation Reminder: ${userData.name}`,
+        html: htmlBody
+    };
+
+    try {
+        await transporter.sendMail(mailOptions);
+        console.log(`[sendEvaluationReminder] Reminder sent to ${recipientType} (${recipientEmail}) for employee ${userData.name}`);
+    } catch (error) {
+        console.error(
+            `[sendEvaluationReminder] Failed to send to ${recipientEmail}. ` +
+            `Error code: ${error.code}, message: ${error.message}`
+        );
+    }
+}
+
+// -----------------------------------------------------------
 // CLOUD FUNCTIONS
 // -----------------------------------------------------------
 
@@ -129,37 +227,54 @@ exports.onLeaveRequestCreate = onDocumentCreated({
     document: "leaveRequests/{requestId}",
     region: "asia-southeast1"
 }, async (event) => {
-    const transporter = nodemailer.createTransport({
-        host: "mail.aibs.edu.lk",
-        port: 465,
-        secure: true,
-        auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS
-        }
-    });
+    const transporter = createTransporter();
+    if (!transporter) {
+        console.error("[onLeaveRequestCreate] Aborting: transporter creation failed.");
+        return;
+    }
 
     const snap = event.data;
     if (!snap) {
-        console.log("No data associated with the event");
+        console.log("[onLeaveRequestCreate] No data associated with the event");
         return;
     }
+
     const requestData = snap.data();
+
+    // Validate required fields before Firestore lookups
+    if (!requestData.managerId) {
+        console.error("[onLeaveRequestCreate] requestData.managerId is missing. Cannot send email.");
+        return;
+    }
+    if (!requestData.userId) {
+        console.error("[onLeaveRequestCreate] requestData.userId is missing. Cannot send email.");
+        return;
+    }
+
     const managerDoc = await db.collection("users").doc(requestData.managerId).get();
     const employeeDoc = await db.collection("users").doc(requestData.userId).get();
 
-    if (!managerDoc.exists || !employeeDoc.exists) {
-        console.error("Manager or Employee not found for the request.");
+    if (!managerDoc.exists) {
+        console.error(`[onLeaveRequestCreate] Manager not found in Firestore. managerId="${requestData.managerId}"`);
+        return;
+    }
+    if (!employeeDoc.exists) {
+        console.error(`[onLeaveRequestCreate] Employee not found in Firestore. userId="${requestData.userId}"`);
         return;
     }
 
     const managerData = managerDoc.data();
     const employeeData = employeeDoc.data();
 
-    // Format dates for display
-    const startDate = new Date(requestData.startDate._seconds * 1000).toLocaleDateString();
-    const endDate = new Date(requestData.endDate._seconds * 1000).toLocaleDateString();
-    const appliedDate = new Date(requestData.appliedOn._seconds * 1000).toLocaleDateString();
+    if (!managerData.email) {
+        console.error(`[onLeaveRequestCreate] Manager has no email field. managerId="${requestData.managerId}"`);
+        return;
+    }
+
+    // Format dates safely — handles both Firestore Timestamps and ISO strings
+    const startDate = formatDate(requestData.startDate);
+    const endDate = formatDate(requestData.endDate);
+    const appliedDate = formatDate(requestData.appliedOn);
 
     const mailOptions = {
         from: '"HRMS Portal" <hrms@aibs.edu.lk>',
@@ -170,9 +285,13 @@ exports.onLeaveRequestCreate = onDocumentCreated({
 
     try {
         await transporter.sendMail(mailOptions);
-        console.log("New request email sent to manager:", managerData.email);
+        console.log(`[onLeaveRequestCreate] Email sent to manager: ${managerData.email}`);
     } catch (error) {
-        console.error("Error sending email:", error);
+        console.error(
+            `[onLeaveRequestCreate] Failed to send email to ${managerData.email}. ` +
+            `Error code: ${error.code}, message: ${error.message}, ` +
+            `SMTP response: ${error.response || 'N/A'}`
+        );
     }
 });
 
@@ -180,38 +299,47 @@ exports.onLeaveRequestUpdate = onDocumentUpdated({
     document: "leaveRequests/{requestId}",
     region: "asia-southeast1"
 }, async (event) => {
-    const transporter = nodemailer.createTransport({
-        host: "mail.aibs.edu.lk",
-        port: 465,
-        secure: true,
-        auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS
-        }
-    });
+    const transporter = createTransporter();
+    if (!transporter) {
+        console.error("[onLeaveRequestUpdate] Aborting: transporter creation failed.");
+        return;
+    }
 
     const change = event.data;
     if (!change) {
-        console.log("No data associated with the event");
+        console.log("[onLeaveRequestUpdate] No data associated with the event");
         return;
     }
+
     const beforeData = change.before.data();
     const afterData = change.after.data();
 
     if (beforeData.status === afterData.status) {
+        console.log("[onLeaveRequestUpdate] Status unchanged, skipping email.");
+        return;
+    }
+
+    if (!afterData.userId) {
+        console.error("[onLeaveRequestUpdate] afterData.userId is missing. Cannot send email.");
         return;
     }
 
     const employeeDoc = await db.collection("users").doc(afterData.userId).get();
     if (!employeeDoc.exists) {
-        console.error("Employee not found for the request update.");
+        console.error(`[onLeaveRequestUpdate] Employee not found in Firestore. userId="${afterData.userId}"`);
         return;
     }
+
     const employeeData = employeeDoc.data();
 
-    // Format dates for display
-    const startDate = new Date(afterData.startDate._seconds * 1000).toLocaleDateString();
-    const endDate = new Date(afterData.endDate._seconds * 1000).toLocaleDateString();
+    if (!employeeData.email) {
+        console.error(`[onLeaveRequestUpdate] Employee has no email field. userId="${afterData.userId}"`);
+        return;
+    }
+
+    // Format dates safely — handles both Firestore Timestamps and ISO strings
+    const startDate = formatDate(afterData.startDate);
+    const endDate = formatDate(afterData.endDate);
 
     const mailOptions = {
         from: '"HRMS Portal" <hrms@aibs.edu.lk>',
@@ -222,9 +350,13 @@ exports.onLeaveRequestUpdate = onDocumentUpdated({
 
     try {
         await transporter.sendMail(mailOptions);
-        console.log("Status update email sent to employee:", employeeData.email);
+        console.log(`[onLeaveRequestUpdate] Status update email sent to employee: ${employeeData.email}`);
     } catch (error) {
-        console.error("Error sending email:", error);
+        console.error(
+            `[onLeaveRequestUpdate] Failed to send email to ${employeeData.email}. ` +
+            `Error code: ${error.code}, message: ${error.message}, ` +
+            `SMTP response: ${error.response || 'N/A'}`
+        );
     }
 });
 
@@ -233,7 +365,7 @@ exports.sendPerformanceEvaluationReminders = onSchedule({
     timeZone: "Asia/Colombo",
     region: "asia-southeast1"
 }, async (event) => {
-    console.log('Starting performance evaluation reminder check...');
+    console.log('[sendPerformanceEvaluationReminders] Starting performance evaluation reminder check...');
     try {
         const usersSnapshot = await db.collection('users').where('role', '==', 'Employee').get();
         const today = new Date();
@@ -249,10 +381,8 @@ exports.sendPerformanceEvaluationReminders = onSchedule({
                 const nextEvaluationDate = new Date(userData.nextEvaluationDate);
 
                 if (nextEvaluationDate.toDateString() === threeDaysFromNow.toDateString()) {
-                    await sendEvaluationReminder(userData, 'employee');
-
                     const hrManagersSnapshot = await db.collection('users')
-                        .where('role', 'in', ['Manager HR', 'Admin'])
+                        .where('role', '==', 'Manager HR')
                         .get();
 
                     for (const hrDoc of hrManagersSnapshot.docs) {
@@ -265,9 +395,9 @@ exports.sendPerformanceEvaluationReminders = onSchedule({
             }
         }
 
-        console.log(`Sent ${reminderCount} performance evaluation reminders`);
+        console.log(`[sendPerformanceEvaluationReminders] Sent ${reminderCount} performance evaluation reminders`);
     } catch (error) {
-        console.error('Error sending performance evaluation reminders:', error);
+        console.error('[sendPerformanceEvaluationReminders] Error:', error.message);
     }
 });
 
@@ -276,7 +406,7 @@ exports.resetMonthlyShortLeave = onSchedule({
     timeZone: "Asia/Colombo",
     region: "asia-southeast1"
 }, async (event) => {
-    console.log('Starting monthly short leave reset...');
+    console.log('[resetMonthlyShortLeave] Starting monthly short leave reset...');
     try {
         const usersSnapshot = await db.collection('users').get();
         const currentDate = new Date().toISOString();
@@ -285,7 +415,6 @@ exports.resetMonthlyShortLeave = onSchedule({
         const batch = db.batch();
 
         for (const doc of usersSnapshot.docs) {
-            const userData = doc.data();
             const userRef = db.collection('users').doc(doc.id);
 
             // Reset short leave balance to 3 for all users (monthly reset, no annual allocation)
@@ -300,9 +429,9 @@ exports.resetMonthlyShortLeave = onSchedule({
 
         await batch.commit();
 
-        console.log(`Successfully reset short leave balances for ${resetCount} users`);
+        console.log(`[resetMonthlyShortLeave] Successfully reset short leave balances for ${resetCount} users`);
     } catch (error) {
-        console.error('Error resetting monthly short leave:', error);
+        console.error('[resetMonthlyShortLeave] Error:', error.message);
     }
 });
 
@@ -312,7 +441,7 @@ exports.onPerformanceEvaluationComplete = onDocumentUpdated({
 }, async (event) => {
     const change = event.data;
     if (!change) {
-        console.log("No data associated with the event");
+        console.log("[onPerformanceEvaluationComplete] No data associated with the event");
         return;
     }
 
@@ -329,7 +458,7 @@ exports.onPerformanceEvaluationComplete = onDocumentUpdated({
             lastEvaluationDate: new Date().toISOString()
         });
 
-        console.log(`Updated evaluation schedule for user ${afterData.name}`);
+        console.log(`[onPerformanceEvaluationComplete] Updated evaluation schedule for user ${afterData.name}`);
     }
 });
 

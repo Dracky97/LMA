@@ -360,46 +360,47 @@ exports.onLeaveRequestUpdate = onDocumentUpdated({
     }
 });
 
-exports.sendPerformanceEvaluationReminders = onSchedule({
-    schedule: "0 9 * * *",
-    timeZone: "Asia/Colombo",
-    region: "asia-southeast1"
-}, async (event) => {
-    console.log('[sendPerformanceEvaluationReminders] Starting performance evaluation reminder check...');
-    try {
-        const usersSnapshot = await db.collection('users').where('role', '==', 'Employee').get();
-        const today = new Date();
-        const threeDaysFromNow = new Date(today);
-        threeDaysFromNow.setDate(today.getDate() + 3);
-
-        let reminderCount = 0;
-
-        for (const doc of usersSnapshot.docs) {
-            const userData = doc.data();
-
-            if (userData.nextEvaluationDate) {
-                const nextEvaluationDate = new Date(userData.nextEvaluationDate);
-
-                if (nextEvaluationDate.toDateString() === threeDaysFromNow.toDateString()) {
-                    const hrManagersSnapshot = await db.collection('users')
-                        .where('role', '==', 'Manager HR')
-                        .get();
-
-                    for (const hrDoc of hrManagersSnapshot.docs) {
-                        const hrData = hrDoc.data();
-                        await sendEvaluationReminder(userData, 'hr', hrData);
-                    }
-
-                    reminderCount++;
-                }
-            }
-        }
-
-        console.log(`[sendPerformanceEvaluationReminders] Sent ${reminderCount} performance evaluation reminders`);
-    } catch (error) {
-        console.error('[sendPerformanceEvaluationReminders] Error:', error.message);
-    }
-});
+// SUSPENDED: Performance evaluation reminders temporarily disabled
+// exports.sendPerformanceEvaluationReminders = onSchedule({
+//     schedule: "0 9 * * *",
+//     timeZone: "Asia/Colombo",
+//     region: "asia-southeast1"
+// }, async (event) => {
+//     console.log('[sendPerformanceEvaluationReminders] Starting performance evaluation reminder check...');
+//     try {
+//         const usersSnapshot = await db.collection('users').where('role', '==', 'Employee').get();
+//         const today = new Date();
+//         const threeDaysFromNow = new Date(today);
+//         threeDaysFromNow.setDate(today.getDate() + 3);
+//
+//         let reminderCount = 0;
+//
+//         for (const doc of usersSnapshot.docs) {
+//             const userData = doc.data();
+//
+//             if (userData.nextEvaluationDate) {
+//                 const nextEvaluationDate = new Date(userData.nextEvaluationDate);
+//
+//                 if (nextEvaluationDate.toDateString() === threeDaysFromNow.toDateString()) {
+//                     const hrManagersSnapshot = await db.collection('users')
+//                         .where('role', '==', 'Manager HR')
+//                         .get();
+//
+//                     for (const hrDoc of hrManagersSnapshot.docs) {
+//                         const hrData = hrDoc.data();
+//                         await sendEvaluationReminder(userData, 'hr', hrData);
+//                     }
+//
+//                     reminderCount++;
+//                 }
+//             }
+//         }
+//
+//         console.log(`[sendPerformanceEvaluationReminders] Sent ${reminderCount} performance evaluation reminders`);
+//     } catch (error) {
+//         console.error('[sendPerformanceEvaluationReminders] Error:', error.message);
+//     }
+// });
 
 exports.resetMonthlyShortLeave = onSchedule({
     schedule: "0 0 1 * *",

@@ -9,7 +9,7 @@ service cloud.firestore {
       
       // Managers can read user data for their team members
       allow read: if request.auth != null &&
-                     request.auth.uid in resource.data.managerId;
+                     request.auth.uid == resource.data.managerId;
       
       // Managers can update leave balances and noPay status when approving leave requests
       allow update: if request.auth != null &&
@@ -22,9 +22,9 @@ service cloud.firestore {
       allow read: if request.auth != null;
       
       // Allow admins full access to all user data (create, read, update, delete)
-      allow read, write: if request.auth != null &&
+      allow read, write: if request.auth != null && (
                            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin' ||
-                           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Manager HR';
+                           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Manager HR');
 
       // Allow HR Managers to update leave balances and noPay status for any user
       allow update: if request.auth != null &&
@@ -43,6 +43,13 @@ service cloud.firestore {
       // Users can read their own leave requests
       allow read: if request.auth != null &&
                      request.auth.uid == resource.data.userId;
+      
+      // Users can cancel (update status to Cancelled) their own leave requests
+      allow update: if request.auth != null &&
+                       request.auth.uid == resource.data.userId &&
+                       request.resource.data.status == 'Cancelled' &&
+                       request.resource.data.diff(resource.data).affectedKeys()
+                       .hasOnly(['status', 'cancelledBy', 'cancellationDate']);
       
       // Direct managers can read and update leave requests for their team members
       allow read, update: if request.auth != null &&

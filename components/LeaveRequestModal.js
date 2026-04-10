@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getFirestore, collection, addDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, serverTimestamp, onSnapshot, query, where } from 'firebase/firestore';
 import { app } from '../lib/firebase-client';
 import { LEAVE_TYPES, getFilteredLeaveTypes } from '../lib/leaveTypes';
 import { validateShortLeave, getCurrentMonthShortLeaveUsage, LEAVE_CONFIG } from '../lib/leavePolicy';
@@ -309,7 +309,6 @@ export default function LeaveRequestModal({ userData, onClose }) {
                 // Special handling for Short Leave - always 0 units since it doesn't deduct from leave days
                 if (type === 'Short Leave') {
                     units = 0;
-                    console.log('Short Leave: Setting leaveUnits to 0 (no day deduction)');
                 }
                 // For all other leave types - Updated to handle standardized half-day timing
                 // Threshold changed from 90 to 120 minutes
@@ -334,9 +333,11 @@ export default function LeaveRequestModal({ userData, onClose }) {
         }
     }, [startTime, endTime, type]);
     
-    // Load leave requests for short leave validation
+    // Load leave requests for short leave validation - filtered by userId for performance
     useEffect(() => {
-        const unsubscribe = onSnapshot(collection(db, "leaveRequests"), (snapshot) => {
+        if (!userData?.uid) return;
+        const q = query(collection(db, "leaveRequests"), where("userId", "==", userData.uid));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
             const requests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setAllLeaveRequests(requests);
             
@@ -346,44 +347,34 @@ export default function LeaveRequestModal({ userData, onClose }) {
         });
         
         return () => unsubscribe();
-    }, [userData.uid]);
+    }, [userData?.uid]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        console.log('Submit button clicked - starting validation');
-         
+
         // Basic validation
-        console.log('Checking dates:', { startDate, endDate });
         if (!startDate || !endDate) {
-            console.log('Validation failed: Missing dates');
             setError('Please select both start and end dates.');
             return;
         }
          
-        console.log('Checking date order');
         if (new Date(endDate) < new Date(startDate)) {
-            console.log('Validation failed: End date before start date');
             setError('End date must be after start date.');
             return;
         }
          
-        console.log('Checking manager assignment:', userData.managerId);
         if (!userData.managerId) {
-            console.log('Validation failed: No manager assigned');
             setError('You do not have a manager assigned. Please contact an Admin.');
             return;
         }
 
         // Validate time fields if provided
-        console.log('Validating time fields:', { startTime, endTime });
         if (startTime && !endTime) {
-            console.log('Validation failed: Missing end time');
             setError('Please select end time.');
             return;
         }
          
         if (!startTime && endTime) {
-            console.log('Validation failed: Missing start time');
             setError('Please select start time.');
             return;
         }
@@ -406,7 +397,6 @@ export default function LeaveRequestModal({ userData, onClose }) {
         }
 
         // Validate business hours (8am - 5pm)
-        console.log('Validating business hours');
         if (startTime || endTime) {
             const validateTime = (timeStr) => {
                 const [hour] = timeStr.split(':').map(Number);
@@ -414,13 +404,11 @@ export default function LeaveRequestModal({ userData, onClose }) {
             };
 
             if (startTime && !validateTime(startTime)) {
-                console.log('Validation failed: Start time out of business hours');
                 setError('Start time must be between 8:00 AM and 5:00 PM.');
                 return;
             }
 
             if (endTime && !validateTime(endTime)) {
-                console.log('Validation failed: End time out of business hours');
                 setError('End time must be between 8:00 AM and 5:00 PM.');
                 return;
             }
@@ -441,33 +429,23 @@ export default function LeaveRequestModal({ userData, onClose }) {
         }
         
         try {
-            console.log('Starting data preparation for submission');
             let finalLeaveUnits;
             let granularTotalHours = 0;
 
             if (useGranularSelection) {
-                console.log('Using granular selection');
-                // Use granular calculation
                 finalLeaveUnits = calculateGranularLeaveUnits();
-                // Calculate hours for short leave tracking
                 granularTotalHours = calculateGranularTotalHours();
                 if (granularTotalHours > 0) {
                     setTotalHours(granularTotalHours);
                 }
             } else {
-                console.log('Using simple calculation');
-                // Use simple calculation
                 if (startTime && endTime) {
-                    console.log('Using time-based leave units:', leaveUnits);
-                    // Now `leaveUnits` is already correctly set by the `useEffect` hook
                     finalLeaveUnits = leaveUnits;
                 } else {
-                    console.log('Using total days:', totalDays);
                     finalLeaveUnits = totalDays;
                 }
             }
 
-            console.log('Preparing request data');
             const requestData = {
                 userId: userData.uid,
                 userName: userData.name,
@@ -486,13 +464,9 @@ export default function LeaveRequestModal({ userData, onClose }) {
                 ...(type === 'Leave in-lieu' && { substituteFor: substituteFor.trim() }),
             };
 
-            console.log('Request data prepared:', requestData);
-
             // Add granular configuration if used
             if (useGranularSelection) {
-                console.log('Adding granular configuration');
                 requestData.dateConfigurations = dateConfigurations;
-                // Save totalHours for short leave tracking in granular mode
                 if (granularTotalHours > 0) {
                     requestData.totalHours = granularTotalHours;
                 }
@@ -500,7 +474,6 @@ export default function LeaveRequestModal({ userData, onClose }) {
 
             // Add time-based fields if provided (for simple mode)
             if (!useGranularSelection && startTime && endTime) {
-                console.log('Adding time-based fields');
                 requestData.startTime = startTime;
                 requestData.endTime = endTime;
                 requestData.totalHours = totalHours;
@@ -509,10 +482,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
                 requestData.isPartialDay = finalLeaveUnits < totalDays;
             }
 
-            console.log('Final request data:', requestData);
-            console.log('Attempting to submit to Firebase');
             await addDoc(collection(db, "leaveRequests"), requestData);
-            console.log('Firebase submission successful');
             setSuccess('Leave request submitted successfully!');
             setTimeout(() => onClose(), 2000);
         } catch (err) {

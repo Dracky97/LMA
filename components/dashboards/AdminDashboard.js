@@ -4,6 +4,7 @@ import { app } from '../../lib/firebase-client';
 import { useAuth } from '../../context/AuthContext';
 import LeaveHistoryTable from '../LeaveHistoryTable';
 import { LEAVE_TYPE_MAP } from '../../lib/leaveTypes';
+import { calculateLeaveEntitlements } from '../../lib/leavePolicy';
 
 const db = getFirestore(app);
 
@@ -256,16 +257,19 @@ export default function AdminDashboard() {
 
     const handleDeleteUser = async (userId) => {
         try {
-            // Delete user document from Firestore
-            const userDocRef = doc(db, 'users', userId);
-            await updateDoc(userDocRef, {
-                deleted: true,
-                deletedAt: new Date(),
-                deletedBy: users.find(u => u.role === 'Admin')?.id || 'admin'
+            const response = await fetch('/api/delete-user', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId })
             });
-            
-            // You might also want to delete from Firebase Auth, but that requires admin SDK
-            setSuccess('User deleted successfully');
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result.error || 'Failed to delete user');
+            }
+
+            setSuccess('User deleted successfully from database and authentication');
             setShowDeleteConfirm(null);
         } catch (error) {
             console.error('Error deleting user:', error);
@@ -284,7 +288,7 @@ export default function AdminDashboard() {
             }
 
             const currentData = userDoc.data();
-            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(' ', '');
+            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(/\s+/g, '');
 
             if (!currentData.leaveBalance) {
                 currentData.leaveBalance = {};
@@ -297,9 +301,15 @@ export default function AdminDashboard() {
             const currentBalance = currentData.leaveBalance[leaveType];
 
             // Use leaveUnits if available, otherwise calculate from dates
-            const duration = request.leaveUnits !== undefined && request.leaveUnits > 0
-                ? request.leaveUnits
-                : Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
+            let duration;
+            if (request.type === 'Short Leave') {
+                // Short Leave uses hours, not days
+                duration = parseFloat(request.totalHours) || 0;
+            } else {
+                duration = request.leaveUnits !== undefined && request.leaveUnits > 0
+                    ? request.leaveUnits
+                    : Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
+            }
 
             // For accruing types, approval ADDED balance, so cancellation should SUBTRACT it back.
             // For normal types, approval SUBTRACTED balance, so cancellation should ADD it back.
@@ -367,12 +377,6 @@ export default function AdminDashboard() {
     };
 
     const openEditModal = (user) => {
-        console.log('=== OPENING EDIT MODAL ===');
-        console.log('User name:', user.name);
-        console.log('Full user object:', user);
-        console.log('User leaveBalance:', user.leaveBalance);
-        console.log('User leaveAllocations:', user.leaveAllocations);
-
         setEditingUser(user);
         setEditUserData({
             name: user.name || '',
@@ -437,10 +441,6 @@ export default function AdminDashboard() {
 
     const saveUserChanges = async () => {
         try {
-            console.log('=== ADMIN DASHBOARD SAVE START ===');
-            console.log('Editing user:', editingUser);
-            console.log('Edit user data:', editUserData);
-
             if (!editingUser) {
                 throw new Error('No user selected for editing');
             }
@@ -451,7 +451,6 @@ export default function AdminDashboard() {
             }
 
             const userDocRef = doc(db, 'users', userId);
-            console.log('User document reference:', userDocRef.path);
 
             // Prepare update data with all editable fields
             // Remove shortLeave from allocations - it uses monthly reset, not annual allocation
@@ -464,27 +463,9 @@ export default function AdminDashboard() {
             // Validate against policy if join date exists
             if (editUserData.joinedDate) {
                 try {
-                    const { calculateLeaveEntitlements } = require('../../lib/leavePolicy');
-                    const policyEntitlements = calculateLeaveEntitlements(editUserData.joinedDate, new Date().getFullYear());
-                    
-                    // Check for significant deviations
-                    const warnings = [];
-                    if (sanitizedAllocations.annualLeave && sanitizedAllocations.annualLeave !== policyEntitlements.annualLeave) {
-                        warnings.push(`Annual Leave: ${sanitizedAllocations.annualLeave} (Policy: ${policyEntitlements.annualLeave})`);
-                    }
-                    if (sanitizedAllocations.sickLeave && sanitizedAllocations.sickLeave !== policyEntitlements.sickLeave) {
-                        warnings.push(`Sick Leave: ${sanitizedAllocations.sickLeave} (Policy: ${policyEntitlements.sickLeave})`);
-                    }
-                    if (sanitizedAllocations.casualLeave && sanitizedAllocations.casualLeave !== policyEntitlements.casualLeave) {
-                        warnings.push(`Casual Leave: ${sanitizedAllocations.casualLeave} (Policy: ${policyEntitlements.casualLeave})`);
-                    }
-                    
-                    if (warnings.length > 0) {
-                        console.warn('Policy deviation detected:', warnings);
-                        // Log but don't block - Admin has override authority
-                    }
+                    calculateLeaveEntitlements(editUserData.joinedDate, new Date().getFullYear());
                 } catch (policyError) {
-                    console.warn('Could not validate against policy:', policyError);
+                    // Policy validation failed - proceed anyway since Admin has override authority
                 }
             }
             
@@ -516,9 +497,6 @@ export default function AdminDashboard() {
                 updateData.nextEvaluationDate = nextEvaluationDate.toISOString();
             }
 
-            console.log('Final update data:', updateData);
-            console.log('Affected keys:', Object.keys(updateData));
-
             // Only proceed if there are actual changes
             if (Object.keys(updateData).length === 0) {
                 setSuccess('No changes to save');
@@ -529,15 +507,11 @@ export default function AdminDashboard() {
 
             await updateDoc(userDocRef, updateData);
 
-            console.log('✅ AdminDashboard update successful');
-            setSuccess('User leave allocations updated successfully');
+            setSuccess('User updated successfully');
             setShowEditModal(false);
             setEditingUser(null);
         } catch (error) {
-            console.error('❌ Error updating user in AdminDashboard:', error);
-            console.error('Error code:', error.code);
-            console.error('Error message:', error.message);
-            console.error('Error stack:', error.stack);
+            console.error('Error updating user:', error);
             setError('Failed to update user: ' + error.message);
         }
     };
@@ -603,9 +577,9 @@ export default function AdminDashboard() {
     };
 
     const confirmResetWithPassword = async () => {
-        // Simple password validation (you can make this more sophisticated)
-        if (adminPassword !== 'admin123') {
-            setPasswordError('Incorrect password. Please try again.');
+        // Validate that a confirmation phrase was entered
+        if (adminPassword !== 'RESET') {
+            setPasswordError('Type RESET (all caps) to confirm this action.');
             return;
         }
 
@@ -1321,19 +1295,14 @@ export default function AdminDashboard() {
                                                 step="0.5"
                                                 value={allocation || 0}
                                                 onChange={(e) => {
-                                                    console.log(`Changing ${leaveType} allocation to:`, e.target.value);
                                                     const newValue = parseFloat(e.target.value) || 0;
-                                                    setEditUserData(prev => {
-                                                        const updated = {
-                                                            ...prev,
-                                                            leaveAllocations: {
-                                                                ...prev.leaveAllocations,
-                                                                [leaveType]: newValue
-                                                            }
-                                                        };
-                                                        console.log('Updated editUserData:', updated);
-                                                        return updated;
-                                                    });
+                                                    setEditUserData(prev => ({
+                                                        ...prev,
+                                                        leaveAllocations: {
+                                                            ...prev.leaveAllocations,
+                                                            [leaveType]: newValue
+                                                        }
+                                                    }));
                                                 }}
                                                 className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-green-500"
                                             />

@@ -13,14 +13,11 @@ import {
 } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { app } from '../lib/firebase-client';
-import { LEAVE_CONFIG } from '../lib/leavePolicy';
+import { LEAVE_CONFIG, calculateLeaveEntitlements } from '../lib/leavePolicy';
 
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Ensure auth is properly initialized
-console.log('Firebase Auth initialized:', auth);
-console.log('Firebase App:', app);
 
 const AuthContext = createContext();
 
@@ -89,7 +86,7 @@ export const AuthProvider = ({ children }) => {
         };
     }, [auth, db]);
 
-    const signup = async (name, email, password, department, managerId, employeeNumber = null, gender = null, designation = null, birthday = null, employeeStatus = 'probation', joinedDate = null) => {
+    const signup = async (name, email, password, department, managerId, employeeNumber = null, gender = null, designation = null, birthday = null, employeeStatus = 'probation', joinedDate = null, role = 'Employee') => {
         try {
             const userCredential = await createUserWithEmailAndPassword(auth, email, password);
             const newUser = userCredential.user;
@@ -101,21 +98,50 @@ export const AuthProvider = ({ children }) => {
             const evaluationDate = new Date(evaluationStartDate);
             evaluationDate.setMonth(evaluationDate.getMonth() + 3);
 
-            // Initialize default leave balances for new users
-            // Note: Short Leave uses monthly reset (3h/month), not annual allocation
+            // Calculate leave entitlements based on the effective join date.
+            // The condition (A, B, or C) is determined by how the join year compares
+            // to the current calendar year:
+            //   Condition A (current year):   Annual=0, Sick=7, Casual=0.5×months
+            //   Condition B (previous year):  Annual=Q1-14/Q2-10/Q3-7/Q4-4, Sick=7, Casual=7
+            //   Condition C (2+ years ago):   Annual=14, Sick=7, Casual=7
+            //   Short Leave = 3 hours/month for all conditions (monthly reset, not annual)
+            const effectiveJoinDate = joinedDate || currentDate.toISOString();
+            let entitlements;
+            try {
+                entitlements = calculateLeaveEntitlements(effectiveJoinDate, currentDate.getFullYear());
+            } catch (calcError) {
+                console.warn('[signup] Could not calculate leave entitlements, using safe defaults:', calcError.message);
+                entitlements = {
+                    annualLeave: 0,
+                    sickLeave: LEAVE_CONFIG.SICK_LEAVE_STANDARD,
+                    casualLeave: 0,
+                    condition: 'A',
+                };
+            }
+
             const leaveBalance = {
-                shortLeave: LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT // Every eligible user starts with 3 short leave hours
+                annualLeave: entitlements.annualLeave,
+                sickLeave:   entitlements.sickLeave,
+                casualLeave: entitlements.casualLeave,
+                shortLeave:  LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT, // 3 hours (resets monthly)
             };
             const leaveAllocations = {
-                // Short Leave is NOT included here - it auto-resets monthly
-                // Other leave types will be added by HR based on policy
+                // Stores the entitlement ceiling used by the Jan 1 annual reset function.
+                // shortLeave is intentionally omitted — it resets monthly automatically.
+                annualLeave: entitlements.annualLeave,
+                sickLeave:   entitlements.sickLeave,
+                casualLeave: entitlements.casualLeave,
             };
+
+            const assignedRole = role || 'Employee';
+            const managerRoles = ['Admin', 'Manager HR', 'HR Manager', 'CEO', 'CMO', 'CFO', 'COO', 'Registrar', 'Head of Academic', 'Head - Student Support', 'Manager IT', 'Finance Manager', 'Manager - Marketing & Student Enrolment', 'Manager - Digital Marketing', 'Sales Manager', 'Academic - Senior Lecturer'];
+            const isManagerRole = managerRoles.some(r => assignedRole.includes(r) || assignedRole.startsWith('Manager') || assignedRole.startsWith('Head'));
 
             return await setDoc(doc(db, 'users', newUser.uid), {
                 name,
                 email,
-                role: 'Employee',
-                isManager: false,
+                role: assignedRole,
+                isManager: isManagerRole,
                 department,
                 managerId: managerId || null,
                 employeeNumber,
@@ -130,6 +156,9 @@ export const AuthProvider = ({ children }) => {
                 socialMedia: { linkedin: '', twitter: '' },
                 leaveBalance,
                 leaveAllocations,
+                leaveCondition: entitlements.condition || 'A',
+                leaveConditionSetAt: currentDate.toISOString(),
+                leaveConditionSetBy: 'Automated System (Condition ' + (entitlements.condition || 'A') + ')',
                 createdAt: currentDate,
             });
         } catch (error) {
@@ -154,6 +183,7 @@ export const AuthProvider = ({ children }) => {
         try {
             await signOut(auth);
             // Remove login time from localStorage
+      
             localStorage.removeItem('loginTime');
             // Redirect to login page after logout
             if (typeof window !== 'undefined') {
@@ -161,7 +191,7 @@ export const AuthProvider = ({ children }) => {
             }
         } catch (error) {
             console.error("Error logging out:", error);
-            throw new Error(`Logout failed: ${error.message}`);
+            throw new Error('Logout failed: ' + error.message);
         }
     };
 
@@ -171,7 +201,7 @@ export const AuthProvider = ({ children }) => {
             return { success: true, message: 'Password reset email sent successfully!' };
         } catch (error) {
             console.error("Error sending password reset email:", error);
-            throw new Error(`Password reset failed: ${error.message}`);
+            throw new Error('Password reset failed: ' + error.message);
         }
     };
 
@@ -179,25 +209,17 @@ export const AuthProvider = ({ children }) => {
         try {
             // If no parameters provided, send password reset email
             if (!currentPassword && !newPassword) {
-                console.log('=== PASSWORD RESET EMAIL ===');
-
                 if (!user || !user.email) {
                     throw new Error('No user is currently signed in');
                 }
 
-                console.log('📧 Sending password reset email to:', user.email);
-
                 await sendPasswordResetEmail(auth, user.email);
-                console.log('✅ Password reset email sent successfully');
 
                 return {
                     success: true,
                     message: 'Password reset link has been sent to your email address. Please check your email and follow the instructions to reset your password.'
                 };
             }
-
-            // Original password change logic (if needed for admin purposes)
-            console.log('=== DIRECT PASSWORD CHANGE ===');
 
             if (!user) {
                 throw new Error('No user is currently signed in');
@@ -206,8 +228,6 @@ export const AuthProvider = ({ children }) => {
             if (!user.email) {
                 throw new Error('User email not available');
             }
-
-            console.log('🔐 Attempting direct password change for:', user.email);
 
             // Re-authenticate user before changing password
             const credential = EmailAuthProvider.credential(user.email, currentPassword);
@@ -228,7 +248,7 @@ export const AuthProvider = ({ children }) => {
             } else if (error.code === 'auth/network-request-failed') {
                 throw new Error('Network error. Please check your internet connection');
             } else {
-                throw new Error(`Password operation failed: ${error.message}`);
+                throw new Error('Password operation failed: ' + error.message);
             }
         }
     };

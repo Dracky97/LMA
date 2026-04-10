@@ -29,23 +29,19 @@ export default function EditProfilePage() {
 
     useEffect(() => {
         const fetchUserData = async () => {
-            console.log('EditProfile: useEffect triggered', { userId, currentUserData: currentUserData?.uid, role: currentUserData?.role });
-
             let userToEdit = currentUserData;
 
             // If userId is provided and current user is HR manager, fetch the target user's data
             if (userId && userId !== currentUserData?.uid &&
                 (currentUserData?.role === 'Admin' || currentUserData?.role === 'HR Manager' || currentUserData?.role?.includes('Manager HR'))) {
-                console.log('EditProfile: Fetching target user data for userId:', userId);
                 try {
                     const userDocRef = doc(db, 'users', userId);
                     const docSnap = await getDoc(userDocRef);
                     if (docSnap.exists()) {
                         userToEdit = docSnap.data();
                         setTargetUserData(userToEdit);
-                        console.log('EditProfile: Target user data loaded:', userToEdit.name);
                     } else {
-                        console.error('EditProfile: User document does not exist for userId:', userId);
+                        console.error('User document does not exist for userId:', userId);
                         setErrors({ submit: 'User not found' });
                         return;
                     }
@@ -54,8 +50,6 @@ export default function EditProfilePage() {
                     setErrors({ submit: 'Failed to load user data' });
                     return;
                 }
-            } else {
-                console.log('EditProfile: Using current user data or not authorized');
             }
 
             if (userToEdit) {
@@ -327,7 +321,7 @@ export default function EditProfilePage() {
 
 
     const handlePasswordReset = async () => {
-        if (!userData?.email) {
+        if (!currentUserData?.email) {
             setErrors(prev => ({ ...prev, password: 'No email address found' }));
             return;
         }
@@ -337,7 +331,6 @@ export default function EditProfilePage() {
         setPasswordSuccess('');
 
         try {
-            console.log('Sending password reset email to:', userData.email);
             const result = await changePassword(); // Call without parameters for email reset
 
             if (result.success) {

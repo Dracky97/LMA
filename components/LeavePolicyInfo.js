@@ -1,5 +1,5 @@
 import React from 'react';
-import { calculateLeaveEntitlements, formatLeaveEntitlements, getQuarterInfo } from '../lib/leavePolicy';
+import { calculateLeaveEntitlements, formatLeaveEntitlements, getQuarterInfo, LEAVE_CONFIG } from '../lib/leavePolicy';
 
 /**
  * Component to display leave policy information and calculations
@@ -78,7 +78,7 @@ export default function LeavePolicyInfo({ employee, year = new Date().getFullYea
                         </div>
                         <div className="flex justify-between">
                             <span className="text-slate-400">Short Leave:</span>
-                            <span className="text-slate-200 font-medium">1 hour/month</span>
+                            <span className="text-slate-200 font-medium">{LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT} hours/month</span>
                         </div>
                     </div>
                 </div>

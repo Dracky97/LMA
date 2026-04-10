@@ -122,7 +122,7 @@ export default function DepartmentManagerDashboard() {
             }
 
             const currentData = userDoc.data();
-            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(' ', '');
+            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(/\s+/g, '');
 
             if (!currentData.leaveBalance || !currentData.leaveBalance.hasOwnProperty(leaveType)) {
                 return true; // No balance means it would go negative
@@ -152,7 +152,7 @@ export default function DepartmentManagerDashboard() {
             }
 
             const currentData = userDoc.data();
-            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(' ', '');
+            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(/\s+/g, '');
 
             if (!currentData.leaveBalance) {
                 currentData.leaveBalance = {};
@@ -192,8 +192,7 @@ export default function DepartmentManagerDashboard() {
                     updatedLeaveBalance[primaryType] = 0;
                     updatedLeaveBalance[fallbackType] = fallbackBalance - remaining;
                     
-                    // Log the cross-utilization for tracking
-                    console.log(`Cross-utilization applied: ${remaining} days from ${fallbackType} to supplement ${primaryType}`);
+
                 } else {
                     // Insufficient total balance - will go negative
                     updatedLeaveBalance[primaryType] = primaryBalance - duration;

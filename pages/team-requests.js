@@ -44,7 +44,7 @@ export default function TeamRequestsPage() {
         };
     }, [userData?.uid]);
 
-    const handleApproval = async (requestId, newStatus) => {
+    const handleApproval = async (requestId, newStatus, rejectionReason = '') => {
         try {
             // Clear any previous messages
             setMessage(null);
@@ -57,32 +57,50 @@ export default function TeamRequestsPage() {
                 throw new Error('Request not found');
             }
 
-            // Check if this approval would result in negative balance
-            const wouldGoNegative = await checkIfRequestWouldGoNegative(request);
+            // Unpaid leave always requires HR approval, regardless of balance status
+            const isUnpaidLeave = request.type === 'Unpaid Leave';
 
-            if (newStatus === 'Approved' && wouldGoNegative) {
-                // Request would go negative - escalate to HR for approval
-                await updateDoc(requestRef, {
-                    status: 'Pending HR Approval',
-                    approvedBy: userData.name,
-                    managerApprovalDate: new Date().toISOString()
-                });
-                setMessage({ type: 'success', text: 'Request escalated to HR for final approval due to insufficient leave balance.' });
-            } else if (newStatus === 'Approved' && !wouldGoNegative) {
-                // Regular approval - deduct balance immediately
-                await updateDoc(requestRef, {
-                    status: 'Approved',
-                    approvedBy: userData.name,
-                    approvalDate: new Date().toISOString()
-                });
+            if (newStatus === 'Approved') {
+                if (isUnpaidLeave) {
+                    await updateDoc(requestRef, {
+                        status: 'Pending HR Approval',
+                        approvedBy: userData.name,
+                        managerApprovalDate: new Date().toISOString(),
+                        rejectionReason: ''
+                    });
+                    setMessage({ type: 'success', text: 'Unpaid leave request escalated to HR for final approval.' });
+                } else {
+                    // Check if this approval would result in negative balance
+                    const wouldGoNegative = await checkIfRequestWouldGoNegative(request);
 
-                await deductLeaveBalance(request);
-                setMessage({ type: 'success', text: 'Leave request approved successfully.' });
+                    if (wouldGoNegative) {
+                        // Request would go negative - escalate to HR for approval
+                        await updateDoc(requestRef, {
+                            status: 'Pending HR Approval',
+                            approvedBy: userData.name,
+                            managerApprovalDate: new Date().toISOString(),
+                            rejectionReason: ''
+                        });
+                        setMessage({ type: 'success', text: 'Request escalated to HR for final approval due to insufficient leave balance.' });
+                    } else {
+                        // Regular approval - deduct balance immediately
+                        await updateDoc(requestRef, {
+                            status: 'Approved',
+                            approvedBy: userData.name,
+                            approvalDate: new Date().toISOString(),
+                            rejectionReason: ''
+                        });
+
+                        await deductLeaveBalance(request);
+                        setMessage({ type: 'success', text: 'Leave request approved successfully.' });
+                    }
+                }
             } else {
                 // Rejection or other status changes
                 await updateDoc(requestRef, {
                     status: newStatus,
                     approvedBy: userData.name,
+                    rejectionReason: newStatus === 'Rejected' ? (rejectionReason?.trim() || '') : '',
                     rejectionDate: newStatus === 'Rejected' ? new Date().toISOString() : null
                 });
                 setMessage({ type: 'success', text: `Leave request ${newStatus.toLowerCase()} successfully.` });
@@ -103,7 +121,7 @@ export default function TeamRequestsPage() {
             }
 
             const currentData = userDoc.data();
-            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(' ', '');
+            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(/\s+/g, '');
 
             if (!currentData.leaveBalance || !currentData.leaveBalance.hasOwnProperty(leaveType)) {
                 return true; // No balance means it would go negative
@@ -139,23 +157,11 @@ export default function TeamRequestsPage() {
             }
 
             const currentData = userDoc.data();
-            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(' ', '');
+            const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(/\s+/g, '');
 
             if (!currentData.leaveBalance) {
                 currentData.leaveBalance = {};
             }
-
-            // Initialize missing leave type if needed
-            if (!currentData.leaveBalance.hasOwnProperty(leaveType)) {
-                // Special initialization for Short Leave - start with monthly limit
-                if (leaveType === 'shortLeave') {
-                    currentData.leaveBalance[leaveType] = LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT;
-                } else {
-                    currentData.leaveBalance[leaveType] = 0;
-                }
-            }
-
-            const currentBalance = currentData.leaveBalance[leaveType];
 
             // Special handling for Short Leave - deduct hours instead of days
             let duration;
@@ -168,32 +174,55 @@ export default function TeamRequestsPage() {
                     : Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
             }
 
-            const newBalance = currentBalance - duration;
+            // Handle cross-utilization for Annual and Casual leave
+            const updatedLeaveBalance = { ...currentData.leaveBalance };
+
+            if (leaveType === 'annualLeave' || leaveType === 'casualLeave') {
+                const primaryType = leaveType;
+                const fallbackType = leaveType === 'annualLeave' ? 'casualLeave' : 'annualLeave';
+
+                if (!updatedLeaveBalance[primaryType]) updatedLeaveBalance[primaryType] = 0;
+                if (!updatedLeaveBalance[fallbackType]) updatedLeaveBalance[fallbackType] = 0;
+
+                const primaryBalance = updatedLeaveBalance[primaryType];
+                const fallbackBalance = updatedLeaveBalance[fallbackType];
+
+                if (primaryBalance >= duration) {
+                    updatedLeaveBalance[primaryType] = primaryBalance - duration;
+                } else if (primaryBalance + fallbackBalance >= duration) {
+                    const remaining = duration - primaryBalance;
+                    updatedLeaveBalance[primaryType] = 0;
+                    updatedLeaveBalance[fallbackType] = fallbackBalance - remaining;
+                } else {
+                    updatedLeaveBalance[primaryType] = primaryBalance - duration;
+                }
+            } else {
+                if (!updatedLeaveBalance[leaveType]) {
+                    updatedLeaveBalance[leaveType] = leaveType === 'shortLeave' ? LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT : 0;
+                }
+                updatedLeaveBalance[leaveType] = updatedLeaveBalance[leaveType] - duration;
+            }
 
             // Check if any leave balance is going negative and update noPay status
-            const updatedLeaveBalance = { ...currentData.leaveBalance, [leaveType]: newBalance };
             const hasNegativeBalance = Object.values(updatedLeaveBalance).some(balance => balance < 0);
             const currentlyOnNoPay = currentData.noPayStatus || false;
 
             // Update noPay status if transitioning to/from negative balance
             if (hasNegativeBalance && !currentlyOnNoPay) {
-                // Starting no pay period
                 await updateDoc(userRef, {
-                    [`leaveBalance.${leaveType}`]: newBalance,
+                    leaveBalance: updatedLeaveBalance,
                     noPayStatus: true,
                     noPayStartDate: new Date().toISOString()
                 });
             } else if (!hasNegativeBalance && currentlyOnNoPay) {
-                // Ending no pay period
                 await updateDoc(userRef, {
-                    [`leaveBalance.${leaveType}`]: newBalance,
+                    leaveBalance: updatedLeaveBalance,
                     noPayStatus: false,
                     noPayEndDate: new Date().toISOString()
                 });
             } else {
-                // No status change needed
                 await updateDoc(userRef, {
-                    [`leaveBalance.${leaveType}`]: newBalance
+                    leaveBalance: updatedLeaveBalance
                 });
             }
         } catch (error) {

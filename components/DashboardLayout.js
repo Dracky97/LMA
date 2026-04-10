@@ -11,7 +11,7 @@ export default function DashboardLayout({ children }) {
         { name: 'Leave', href: '/dashboard' },
         { name: 'Attendance', href: '/attendance' },
         { name: 'Calendar', href: '/calendar' },
-        { name: 'My Profile', href: `/profile/${userData?.uid}` },
+        { name: 'My Profile', href: userData?.uid ? `/profile/${userData.uid}` : '#' },
     ];
 
     // Conditionally add the Team Requests link if the user is a manager
@@ -27,7 +27,7 @@ export default function DashboardLayout({ children }) {
                         <h1 className="text-2xl font-bold text-white">HR Portal</h1>
                         {userData && <p className="text-sm text-white">Welcome, {userData.name}</p>}
                     </div>
-                    <div className="flex items-center">
+                    <div className="flex items-center space-x-3">
                         <button onClick={logout} className="flex items-center space-x-2 text-sm font-medium text-slate-300 hover:text-[#c6a876]">
                             {/* Logout Icon SVG */}
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>

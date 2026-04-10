@@ -37,9 +37,19 @@ export default function AttendancePage() {
         };
     }, [userData]);
 
+    const parseTimestamp = (ts) => {
+        if (!ts) return null;
+        if (ts.toDate) return ts.toDate();
+        if (ts.seconds) return new Date(ts.seconds * 1000);
+        if (ts._seconds) return new Date(ts._seconds * 1000);
+        const d = new Date(ts);
+        return isNaN(d.getTime()) ? null : d;
+    };
+
     const formatDate = (timestamp) => {
-        if (!timestamp || !timestamp.toDate) return 'N/A';
-        return timestamp.toDate().toLocaleString('en-US', {
+        const d = parseTimestamp(timestamp);
+        if (!d) return 'N/A';
+        return d.toLocaleString('en-US', {
             dateStyle: 'medium',
             timeStyle: 'short'
         });
@@ -70,7 +80,7 @@ export default function AttendancePage() {
                                 ) : attendanceHistory.length > 0 ? (
                                     attendanceHistory.map(record => (
                                         <tr key={record.id}>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-200">{new Date(record.clockIn.seconds * 1000).toLocaleDateString()}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-200">{(parseTimestamp(record.clockIn) || new Date()).toLocaleDateString()}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatDate(record.clockIn)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{record.clockOut ? formatDate(record.clockOut) : '---'}</td>
                                         </tr>

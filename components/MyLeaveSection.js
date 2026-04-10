@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { getFirestore, collection, query, where, onSnapshot } from 'firebase/firestore';
+import { getFirestore, collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { app } from '../lib/firebase-client';
 import { LEAVE_CONFIG, getCurrentMonthShortLeaveUsage } from '../lib/leavePolicy';
 import LeaveBalanceCard from './LeaveBalanceCard';
@@ -13,6 +13,8 @@ export default function MyLeaveSection() {
   const { userData } = useAuth();
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [showModal, setShowModal] = useState(false);
+  const [cancelError, setCancelError] = useState('');
+  const [cancelSuccess, setCancelSuccess] = useState('');
 
   useEffect(() => {
     if (!userData?.uid) return;
@@ -52,6 +54,25 @@ export default function MyLeaveSection() {
     return () => unsubscribe();
   }, [userData?.uid]);
 
+  const handleCancelRequest = async (request) => {
+    if (!window.confirm(`Cancel your ${request.type} request? This cannot be undone.`)) return;
+    setCancelError('');
+    setCancelSuccess('');
+    try {
+      const requestRef = doc(db, 'leaveRequests', request.id);
+      await updateDoc(requestRef, {
+        status: 'Cancelled',
+        cancelledBy: userData.name,
+        cancellationDate: new Date().toISOString()
+      });
+      setCancelSuccess('Leave request cancelled successfully.');
+      setTimeout(() => setCancelSuccess(''), 4000);
+    } catch (error) {
+      console.error('Error cancelling leave request:', error);
+      setCancelError('Failed to cancel request: ' + error.message);
+    }
+  };
+
   if (!userData) {
     return <div>Loading personal leave info...</div>;
   }
@@ -73,8 +94,6 @@ export default function MyLeaveSection() {
       <div className="bg-card p-6 rounded-lg shadow-sm">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold text-slate-200">My Leave Requests</h2>
-          {/* --- FIX IMPLEMENTED HERE --- */}
-          {/* This button is now hidden only if the user's role is 'CEO' */}
           {userData.role !== 'CEO' && (
             <button
               onClick={() => setShowModal(true)}
@@ -84,7 +103,9 @@ export default function MyLeaveSection() {
             </button>
           )}
         </div>
-        <LeaveHistoryTable requests={leaveRequests} />
+        {cancelError && <div className="mb-3 p-3 bg-red-900/30 text-red-300 rounded-md text-sm">{cancelError}</div>}
+        {cancelSuccess && <div className="mb-3 p-3 bg-green-900/30 text-green-300 rounded-md text-sm">{cancelSuccess}</div>}
+        <LeaveHistoryTable requests={leaveRequests} canCancel={true} onCancel={handleCancelRequest} />
       </div>
       {showModal && <LeaveRequestModal userData={userData} onClose={() => setShowModal(false)} />}
     </div>

@@ -1,281 +1,152 @@
-# Leave Policy Logic Implementation
-
-## Overview
-
-This document outlines the implementation of the Leave Policy Logic Specification for the Leave Management Application. The system now supports comprehensive leave entitlement calculations based on employee join date and current year.
-
-## 🎯 Implemented Features
-
-### 1. Leave Entitlements Logic
-
-The system now implements three distinct leave conditions based on employee join date:
-
-#### Condition A: Current Year Joiner
-- **Annual Leave**: 0 days
-- **Sick Leave**: 7 days
-- **Casual Leave**: 0.5 × completed months of service
-
-#### Condition B: Previous Year Joiner
-- **Sick Leave**: 7 days
-- **Casual Leave**: 7 days
-- **Annual Leave**: Based on join date lookup table
-
-#### Condition C: Long-term Employee
-- **Annual Leave**: 14 days
-- **Sick Leave**: 7 days
-- **Casual Leave**: 7 days
-
-### 2. Annual Leave Lookup Table (Previous Year Joiners)
-
-| Join Date Range | Annual Leave Entitlement |
-|----------------|-------------------------|
-| Q1 (Jan 1 - Mar 31) | 14 days |
-| Q2 (Apr 1 - Jun 30) | 10 days |
-| Q3 (Jul 1 - Sep 30) | 7 days |
-| Q4 (Oct 1 - Dec 31) | 4 days |
-
-### 3. Short Leave Policy
-
-- **Monthly Allowance**: 3 hours per month (auto-resets monthly)
-- **Maximum per Request**: 2 hours
-- **Validation**: Cannot apply for 3+ hours in a single request
-- **Important**: Short Leave does NOT use annual allocation - it automatically resets to 3 hours at the start of each month
-- **No Carryover**: Unused short leave hours do not carry over to the next month
-
-## 📁 Files Created/Modified
-
-### New Files
-1. **`lib/leavePolicy.js`** - Core policy logic implementation
-2. **`components/LeavePolicyInfo.js`** - UI components for policy display
-
-### Modified Files
-1. **`components/LeaveRequestModal.js`** - Integrated short leave validation
-2. **`components/dashboards/HRManagerDashboard.js`** - Added policy management features
-
-## 🔧 Key Functions Implemented
-
-### Core Policy Functions (`lib/leavePolicy.js`)
-
-#### `calculateLeaveEntitlements(joinDate, currentYear)`
-Calculates leave entitlements based on the employee's join date and current year.
-
-```javascript
-// Example usage
-const entitlements = calculateLeaveEntitlements('2023-03-15', 2024);
-// Returns: { annualLeave: 10, sickLeave: 7, casualLeave: 7, condition: 'B' }
-```
-
-#### `validateShortLeave(requestedHours, usedHoursThisMonth, requestDate)`
-Validates short leave requests against policy constraints.
-
-```javascript
-// Example usage
-const validation = validateShortLeave(1.5, 1.0);
-// Returns: { isValid: true, remainingHoursThisMonth: 2.0, errors: [] }
-```
-
-#### `calculateCompletedMonths(joinDate, currentDate)`
-Calculates completed months of service for Condition A employees.
-
-#### `getQuarterInfo(joinDate)`
-Provides quarterly information for annual leave calculation (Condition B).
-
-### UI Components (`components/LeavePolicyInfo.js`)
-
-#### `LeavePolicyInfo(employee, year)`
-Displays detailed leave policy information for a specific employee.
-
-#### `LeavePolicyReference()`
-Shows the complete policy reference guide.
-
-## 🎨 User Interface Enhancements
-
-### HR Manager Dashboard
-
-1. **New "Leave Policy" Tab**
-   - Policy reference guide
-   - Employee policy calculator
-   - Bulk leave balance calculation tool
-
-2. **Enhanced Leave Request Modal**
-   - Real-time short leave usage tracking
-   - Policy-compliant validation
-   - Visual feedback for policy constraints
-
-3. **Edit Balance Modal**
-   - Integrated policy information display
-   - Shows expected entitlements based on join date
-
-### Short Leave Validation Features
-
-1. **Real-time Usage Tracking**
-   - Shows current month usage: "Used: 1.5h / 3h monthly allowance"
-   - Displays remaining hours: "Remaining: 1.5h"
-   - Maximum per request reminder: "Max 2h per request"
-
-2. **Smart Validation**
-   - Prevents requests exceeding 2 hours
-   - Blocks requests that would exceed monthly allowance
-   - Clear error messages for policy violations
-
-## 🔄 Bulk Operations
-
-### Calculate All Leave Balances
-HR can now automatically calculate and update leave balances for all employees based on the new policy:
-
-1. **Policy-based Calculation**: Uses join date to determine entitlements
-2. **Current Usage Consideration**: Factors in already taken leave for the year
-3. **Batch Processing**: Updates all employees with a single operation
-4. **Error Handling**: Reports individual failures while continuing with others
-
-## 🧮 Calculation Examples
-
-### Example 1: Current Year Joiner
-- **Join Date**: March 15, 2024
-- **Current Date**: January 2, 2026
-- **Completed Months**: 9 months (March 2024 to January 2026)
-- **Entitlements**:
-  - Annual Leave: 0 days
-  - Sick Leave: 7 days
-  - Casual Leave: 4.5 days (0.5 × 9 months)
-
-### Example 2: Previous Year Joiner
-- **Join Date**: May 20, 2023
-- **Current Year**: 2024
-- **Condition**: B (Previous year joiner)
-- **Quarter**: Q2 (Apr-Jun)
-- **Entitlements**:
-  - Annual Leave: 10 days
-  - Sick Leave: 7 days
-  - Casual Leave: 7 days
-
-### Example 3: Long-term Employee
-- **Join Date**: January 10, 2020
-- **Current Year**: 2024
-- **Condition**: C (Before previous year)
-- **Entitlements**:
-  - Annual Leave: 14 days
-  - Sick Leave: 7 days
-  - Casual Leave: 7 days
-
-## 🔒 Policy Validation
-
-### Short Leave Validation Rules
-
-1. **Single Request Limit**: Maximum 2 hours per request
-2. **Monthly Allowance**: Maximum 3 hours per calendar month
-3. **Positive Hours**: Must be greater than 0
-4. **Real-time Checking**: Validates against current month usage
-
-### Validation Error Messages
-
-- "Single short leave request cannot exceed 2 hours"
-- "Monthly allowance exceeded. Available: 1.5h, Requested: 2h"
-- "Short leave request must be greater than 0 hours"
-
-## 🎯 Usage Instructions
-
-### For HR Managers
-
-1. **View Policy Reference**
-   - Navigate to "Leave Policy" tab in HR Dashboard
-   - Review complete policy documentation
-
-2. **Calculate Individual Entitlements**
-   - Select employee from dropdown in Policy tab
-   - View detailed entitlement breakdown
-   - See policy rationale and calculations
-
-3. **Bulk Update Balances**
-   - Use "Calculate All Balances" in Policy tab
-   - Confirm bulk operation warning
-   - Review results and any errors
-
-4. **Monitor Short Leave Usage**
-   - Check real-time usage in leave request modal
-   - Validate against policy constraints before approval
-
-### For Employees
-
-1. **Short Leave Requests**
-   - Check current month usage before applying
-   - Ensure requests don't exceed 2 hours
-   - Monitor remaining monthly allowance
-
-2. **Leave Balance Display**
-   - View updated balances in leave request modal
-   - See policy-compliant calculations
-   - Understand entitlement basis
-
-## 🔍 Testing Recommendations
-
-### Policy Calculation Testing
-1. Test all three conditions with various join dates
-2. Verify quarterly calculations for Condition B
-3. Validate month calculations for Condition A
-
-### Short Leave Validation Testing
-1. Test single requests exceeding 2 hours
-2. Test monthly allowance exceedance
-3. Test zero/negative hour requests
-4. Test end-of-month boundary conditions
-
-### Integration Testing
-1. Test bulk balance calculations
-2. Test policy info display in edit modal
-3. Test error handling for missing join dates
-
-## 🚀 Future Enhancements
-
-1. **Automated Annual Reset**: Schedule automatic balance calculations
-2. **Policy Versioning**: Track policy changes over time
-3. **Advanced Reporting**: Policy compliance reports
-4. **Email Notifications**: Policy violation alerts
-5. **Mobile Responsive**: Enhanced mobile policy display
-
-## 📊 Performance Considerations
-
-1. **Efficient Calculations**: Optimized date arithmetic
-2. **Minimal Database Queries**: Batch processing where possible
-3. **Real-time Updates**: Efficient short leave usage tracking
-4. **Error Recovery**: Graceful handling of calculation failures
-
-## 🔧 Maintenance Notes
-
-1. **Policy Updates**: Modify `lib/leavePolicy.js` for policy changes
-2. **UI Modifications**: Update `components/LeavePolicyInfo.js` for display changes
-3. **Validation Rules**: Adjust short leave validation in modal components
-4. **Data Migration**: Use bulk calculation feature for existing employee data
-
-## ⚠️ Policy Conflict Resolution (February 2026)
-
-### Issues Identified and Fixed:
-
-1. **Short Leave Calculation Conflict**
-   - **Problem**: Short Leave was using both monthly reset (3h/month) AND annual allocation (36h/year) approaches inconsistently
-   - **Solution**: Removed annual allocation for Short Leave; now exclusively uses monthly reset (3h/month, auto-resets)
-   - **Files Modified**:
-     - [`context/AuthContext.js`](context/AuthContext.js) - Removed shortLeave from leaveAllocations
-     - [`functions/index.js`](functions/index.js) - Removed annual allocation from monthly reset function
-     - [`components/LeaveBalanceCard.js`](components/LeaveBalanceCard.js) - Updated to show monthly limit instead of annual allocation
-
-2. **Manual Balance Editing Override**
-   - **Problem**: HR/Admin could manually edit leave balances without validation against policy calculations
-   - **Solution**: Added policy validation warnings when manual edits deviate from policy-calculated entitlements
-   - **Files Modified**:
-     - [`components/dashboards/HRManagerDashboard.js`](components/dashboards/HRManagerDashboard.js) - Added validation with confirmation prompt
-     - [`components/dashboards/AdminDashboard.js`](components/dashboards/AdminDashboard.js) - Added validation logging (Admin has override authority)
-
-### Key Policy Rules (Clarified):
-
-- **Short Leave**: 3 hours per month, auto-resets monthly, NO annual allocation, NO carryover
-- **Annual Leave**: Based on join date condition (A/B/C) and quarterly entitlements for Condition B
-- **Sick Leave**: 7 days standard for all conditions
-- **Casual Leave**: 7 days standard (except Condition A: 0.5 days per completed month)
-- **Manual Edits**: HR receives warnings when deviating from policy; Admin can override with logging
+# Leave Policy Implementation
+
+**Version**: 2.0  
+**Effective Date**: April 10, 2026  
+**Compatibility**: Next.js, Firebase Firestore
 
 ---
 
-**Implementation Date**: January 2, 2026  
-**Version**: 1.0  
-**Compatibility**: Next.js 16.0.10, Firebase Firestore
+## Overview
+
+Leave entitlements are calculated dynamically based on an employee's join date relative to the current calendar year. There are three employee conditions (A, B, C) and a separate short leave policy that applies globally to all employees.
+
+---
+
+## 1. Leave Entitlements by Condition
+
+### Condition A — Current Year Joiner
+> Employee joined in the **current calendar year**
+
+| Leave Type    | Entitlement                          |
+|---------------|--------------------------------------|
+| Annual Leave  | 0 days                               |
+| Sick Leave    | 7 days                               |
+| Casual Leave  | 0.5 × completed months of service   |
+
+**Casual Leave Accrual**: Calculated as `completedMonths × 0.5`. A month is counted as complete only when the reference day is ≥ the join day.
+
+---
+
+### Condition B — Previous Year Joiner
+> Employee joined in the **immediately preceding calendar year**
+
+| Leave Type    | Entitlement                        |
+|---------------|------------------------------------|
+| Annual Leave  | Based on join-quarter lookup table |
+| Sick Leave    | 7 days                             |
+| Casual Leave  | 7 days                             |
+
+**Annual Leave Lookup Table (by join quarter):**
+
+| Join Quarter | Date Range         | Annual Leave |
+|--------------|--------------------|--------------|
+| Q1           | Jan 1 – Mar 31     | 14 days      |
+| Q2           | Apr 1 – Jun 30     | 10 days      |
+| Q3           | Jul 1 – Sep 30     | 7 days       |
+| Q4           | Oct 1 – Dec 31     | 4 days       |
+
+---
+
+### Condition C — Long-term Employee
+> Employee joined **two or more calendar years ago**
+
+| Leave Type    | Entitlement |
+|---------------|-------------|
+| Annual Leave  | 14 days     |
+| Sick Leave    | 7 days      |
+| Casual Leave  | 7 days      |
+
+---
+
+## 2. Short Leave Policy
+
+Short leave applies globally to all employees regardless of condition.
+
+| Rule                    | Value                              |
+|-------------------------|------------------------------------|
+| Monthly Allowance       | 3 hours per calendar month         |
+| Maximum per Request     | 2 hours                            |
+| Reset                   | Automatic at the start of each month |
+| Carryover               | None — unused hours do not carry over |
+| Annual Allocation       | None — short leave is monthly only |
+
+**Validation Rules:**
+- A single request must not exceed 2 hours.
+- A request that would push total monthly usage above 3 hours is rejected.
+
+---
+
+## 3. Core Implementation
+
+**File**: `lib/leavePolicy.js`
+
+### Configuration (`LEAVE_CONFIG`)
+
+```js
+ANNUAL_LEAVE_TIERS:       [14, 10, 7, 4]  // Q1→Q4 for Condition B
+SICK_LEAVE_STANDARD:      7               // days
+CASUAL_LEAVE_STANDARD:    7               // days
+ANNUAL_LEAVE_STANDARD:    14              // days (Condition C)
+CASUAL_LEAVE_ACCRUAL_RATE: 0.5           // days per completed month (Condition A)
+SHORT_LEAVE_MONTHLY_LIMIT: 3             // hours per month
+SHORT_LEAVE_REQUEST_LIMIT: 2             // hours per single request
+```
+
+### Key Functions
+
+| Function | Description |
+|---|---|
+| `getLeaveCondition(joinDate, currentYear)` | Returns `'A'`, `'B'`, or `'C'` based on join year |
+| `calculateLeaveEntitlements(joinDate, currentYear)` | Returns full entitlement object for an employee |
+| `calculateLeaveBalances(employee, leaveRequests, year)` | Returns remaining balances after deducting approved leave |
+| `validateShortLeave(requestedHours, usedHoursThisMonth)` | Validates a short leave request against policy rules |
+| `getCurrentMonthShortLeaveUsage(userId, leaveRequests)` | Returns total approved short leave hours in the current month |
+| `calculateCompletedMonths(joinDate, referenceDate)` | Returns completed months of service (used for Condition A accrual) |
+| `getQuarterInfo(joinDate)` | Returns quarter number, name, date range, and annual leave entitlement |
+| `formatLeaveEntitlements(entitlements)` | Returns human-readable entitlement strings for UI display |
+
+---
+
+## 4. Calculation Examples
+
+### Example 1 — Condition A (Current Year Joiner)
+- Join Date: March 15, 2026
+- Reference Date: December 31, 2026
+- Completed Months: 9
+- **Casual Leave**: 9 × 0.5 = **4.5 days**
+- Annual Leave: 0 days | Sick Leave: 7 days
+
+### Example 2 — Condition B (Previous Year Joiner, Q2)
+- Join Date: May 20, 2025
+- Current Year: 2026
+- Join Quarter: Q2 (Apr–Jun)
+- **Annual Leave**: 10 days
+- Sick Leave: 7 days | Casual Leave: 7 days
+
+### Example 3 — Condition C (Long-term Employee)
+- Join Date: January 10, 2021
+- Current Year: 2026
+- **Annual Leave**: 14 days
+- Sick Leave: 7 days | Casual Leave: 7 days
+
+### Example 4 — Short Leave Validation
+- Monthly Allowance: 3 hours | Already Used: 1.5 hours
+- Request: 1.5 hours → **Valid** (total = 3 hours, within limit)
+- Request: 2 hours → **Invalid** (total = 3.5 hours, exceeds limit)
+- Request: 2.5 hours → **Invalid** (exceeds 2-hour single-request cap)
+
+---
+
+## 5. Policy Rules Summary
+
+| Rule | Value |
+|---|---|
+| Condition A annual leave | 0 days |
+| Condition A casual leave | 0.5 days × completed months |
+| Condition B/C sick leave | 7 days |
+| Condition B/C casual leave | 7 days |
+| Condition C annual leave | 14 days |
+| Short leave monthly limit | 3 hours |
+| Short leave per-request cap | 2 hours |
+| Short leave carryover | None |
+| Short leave annual allocation | None |

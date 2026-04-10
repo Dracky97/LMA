@@ -4,6 +4,7 @@ const getStatusBadge = (status) => {
     const statuses = {
         'Approved': 'bg-green-900/30 text-green-300',
         'Rejected': 'bg-red-900/30 text-red-300',
+        'Pending': 'bg-yellow-900/30 text-yellow-300',
         'Pending HR Approval': 'bg-blue-900/30 text-blue-300',
         'Pending Department Approval': 'bg-yellow-900/30 text-yellow-300',
         'Cancelled': 'bg-slate-700 text-slate-300'
@@ -23,9 +24,9 @@ export default function LeaveHistoryTable({ requests, users = {}, isAdminView = 
     };
 
     return (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overflow-y-auto max-h-[500px]">
             <table className="min-w-full divide-y divide-gray-700">
-                <thead className="bg-muted">
+                <thead className="bg-muted sticky top-0 z-10">
                     <tr>
                         {isAdminView && <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Employee</th>}
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Type</th>
@@ -55,11 +56,11 @@ export default function LeaveHistoryTable({ requests, users = {}, isAdminView = 
                             </td>
                             {canCancel && (
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-                                    {req.status === 'Approved' ? (
+                                    {(req.status === 'Approved' || req.status === 'Pending' || req.status === 'Pending HR Approval' || req.status === 'Pending Department Approval') ? (
                                         <button
                                             onClick={() => onCancel(req)}
                                             className="text-red-400 hover:text-red-300 transition-colors"
-                                            title="Cancel approved leave"
+                                            title={`Cancel ${req.status.toLowerCase()} leave`}
                                         >
                                             Cancel
                                         </button>

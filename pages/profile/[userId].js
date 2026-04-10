@@ -72,10 +72,6 @@ export default function ProfilePage() {
     const canEditEvaluation = currentUserData?.role === 'Admin' || currentUserData?.role === 'Manager HR' || currentUserData?.role === 'HR Manager';
     const canViewEmergencyContacts = currentUserData?.role === 'Admin' || currentUserData?.role === 'Manager HR' || currentUserData?.role === 'HR Manager';
 
-    // Debug logging for role checking
-    console.log('Current user role:', currentUserData?.role);
-    console.log('Can edit evaluation:', canEditEvaluation);
-
     return (
         <DashboardLayout>
             {/* Profile Header with Cover Photo */}
@@ -120,10 +116,7 @@ export default function ProfilePage() {
                                 {profileData.designation ? `${profileData.designation} - ` : ''}{profileData.department}
                             </p>
                             <p className="text-slate-500 mt-2">{profileData.personalDetails?.address || 'Location not specified'}</p>
-                            {/* Current user role indicator for debugging */}
-                            <p className="text-xs text-slate-600 mt-1">
-                                Your role: {currentUserData?.role || 'Not set'} {canEditEvaluation ? '(Can edit evaluations)' : '(Cannot edit evaluations)'}
-                            </p>
+
                         </div>
                         {canEdit && (
                             <button

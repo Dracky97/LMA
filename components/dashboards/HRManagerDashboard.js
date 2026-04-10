@@ -9,7 +9,7 @@ import LeaveRequestModal from '../LeaveRequestModal';
 import MyLeaveSection from '../MyLeaveSection';
 import LeavePolicyInfo, { LeavePolicyReference } from '../LeavePolicyInfo';
 import { LEAVE_TYPE_MAP, validateLeaveType, LEAVE_TYPES } from '../../lib/leaveTypes';
-import { calculateLeaveBalances, LEAVE_CONFIG } from '../../lib/leavePolicy';
+import { calculateLeaveBalances, calculateLeaveEntitlements, LEAVE_CONFIG } from '../../lib/leavePolicy';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -576,12 +576,12 @@ export default function HRManagerDashboard() {
                     `${emp.approvedRequests}/${emp.pendingRequests}/${emp.rejectedRequests}` : '-';
                 pdf.text(reqText, colX[5], yPosition);
                 
-                pdf.text(emp.leaveBalance['Annual Leave'] !== undefined ?
-                    emp.leaveBalance['Annual Leave'].toFixed(1) : '-', colX[6], yPosition);
-                pdf.text(emp.leaveBalance['Casual Leave'] !== undefined ?
-                    emp.leaveBalance['Casual Leave'].toFixed(1) : '-', colX[7], yPosition);
-                pdf.text(emp.leaveBalance['Medical Leave'] !== undefined ?
-                    emp.leaveBalance['Medical Leave'].toFixed(1) : '-', colX[8], yPosition);
+                pdf.text(emp.leaveBalance['annualLeave'] !== undefined ?
+                    emp.leaveBalance['annualLeave'].toFixed(1) : '-', colX[6], yPosition);
+                pdf.text(emp.leaveBalance['casualLeave'] !== undefined ?
+                    emp.leaveBalance['casualLeave'].toFixed(1) : '-', colX[7], yPosition);
+                pdf.text(emp.leaveBalance['sickLeave'] !== undefined ?
+                    emp.leaveBalance['sickLeave'].toFixed(1) : '-', colX[8], yPosition);
                 
                 yPosition += 5;
             });
@@ -671,11 +671,6 @@ export default function HRManagerDashboard() {
     const formatLeaveBalance = (balance) => {
         if (balance === undefined || balance === null) return '0';
         return balance % 1 === 0 ? balance.toString() : balance.toFixed(1);
-    };
-
-    const handleCancelLeave = async (requestId, reason) => {
-        // Implementation for admin cancellation
-        console.log("Cancelling", requestId, reason);
     };
 
     // --- UI Modals & Editing ---
@@ -893,13 +888,19 @@ export default function HRManagerDashboard() {
 
     const handleDeleteUser = async (userId) => {
         try {
-            const userRef = doc(db, 'users', userId);
-            await updateDoc(userRef, {
-                deleted: true,
-                deletedAt: new Date(),
-                deletedBy: userData?.uid || 'hr-manager'
+            const response = await fetch('/api/delete-user', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId })
             });
-            setSuccess('User deleted successfully');
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result.error || 'Failed to delete user');
+            }
+
+            setSuccess('User deleted successfully from database and authentication');
             setShowDeleteConfirm(null);
             setTimeout(() => setSuccess(''), 3000);
         } catch (error) {
@@ -1020,7 +1021,7 @@ export default function HRManagerDashboard() {
                 {/* 3. HISTORY TAB */}
                 {activeTab === 'history' && (
                     <div className="p-6">
-                        <LeaveHistoryTable requests={allRequests} users={users} isAdminView={true} canCancel={true} onCancel={handleCancelLeave} />
+                        <LeaveHistoryTable requests={allRequests} users={users} isAdminView={true} />
                     </div>
                 )}
 
@@ -1183,21 +1184,21 @@ export default function HRManagerDashboard() {
                                                                 ) : '-'}
                                                             </td>
                                                             <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-300">
-                                                                {employee.leaveBalance['Annual Leave'] !== undefined ?
-                                                                    <span className={employee.leaveBalance['Annual Leave'] < 0 ? 'text-red-400 font-semibold' : ''}>
-                                                                        {employee.leaveBalance['Annual Leave'].toFixed(1)}
+                                                                {employee.leaveBalance['annualLeave'] !== undefined ?
+                                                                    <span className={employee.leaveBalance['annualLeave'] < 0 ? 'text-red-400 font-semibold' : ''}>
+                                                                        {employee.leaveBalance['annualLeave'].toFixed(1)}
                                                                     </span> : '-'}
                                                             </td>
                                                             <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-300">
-                                                                {employee.leaveBalance['Casual Leave'] !== undefined ?
-                                                                    <span className={employee.leaveBalance['Casual Leave'] < 0 ? 'text-red-400 font-semibold' : ''}>
-                                                                        {employee.leaveBalance['Casual Leave'].toFixed(1)}
+                                                                {employee.leaveBalance['casualLeave'] !== undefined ?
+                                                                    <span className={employee.leaveBalance['casualLeave'] < 0 ? 'text-red-400 font-semibold' : ''}>
+                                                                        {employee.leaveBalance['casualLeave'].toFixed(1)}
                                                                     </span> : '-'}
                                                             </td>
                                                             <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-300">
-                                                                {employee.leaveBalance['Medical Leave'] !== undefined ?
-                                                                    <span className={employee.leaveBalance['Medical Leave'] < 0 ? 'text-red-400 font-semibold' : ''}>
-                                                                        {employee.leaveBalance['Medical Leave'].toFixed(1)}
+                                                                {employee.leaveBalance['sickLeave'] !== undefined ?
+                                                                    <span className={employee.leaveBalance['sickLeave'] < 0 ? 'text-red-400 font-semibold' : ''}>
+                                                                        {employee.leaveBalance['sickLeave'].toFixed(1)}
                                                                     </span> : '-'}
                                                             </td>
                                                         </tr>
@@ -1480,11 +1481,22 @@ export default function HRManagerDashboard() {
                     <div className="bg-slate-800 p-6 rounded-lg w-96">
                         <h3 className="text-xl text-white mb-4">Edit Balances: {editingUser?.name}</h3>
                         <div className="space-y-3">
-                            <label className="block text-slate-300">Annual Leave Balance</label>
-                            <input type="number" value={editBalanceData.annualLeave} onChange={e => setEditBalanceData(prev => ({...prev, annualLeave: parseFloat(e.target.value)}))} className="w-full bg-slate-700 text-white p-2 rounded" />
-                            <label className="block text-slate-300">Casual Leave Balance</label>
-                            <input type="number" value={editBalanceData.casualLeave} onChange={e => setEditBalanceData(prev => ({...prev, casualLeave: parseFloat(e.target.value)}))} className="w-full bg-slate-700 text-white p-2 rounded" />
-                            {/* Add other fields as needed */}
+                            <div>
+                                <label className="block text-slate-300 text-sm mb-1">Annual Leave Balance (days)</label>
+                                <input type="number" step="0.5" value={editBalanceData.annualLeave ?? 0} onChange={e => setEditBalanceData(prev => ({...prev, annualLeave: parseFloat(e.target.value) || 0}))} className="w-full bg-slate-700 text-white p-2 rounded" />
+                            </div>
+                            <div>
+                                <label className="block text-slate-300 text-sm mb-1">Casual Leave Balance (days)</label>
+                                <input type="number" step="0.5" value={editBalanceData.casualLeave ?? 0} onChange={e => setEditBalanceData(prev => ({...prev, casualLeave: parseFloat(e.target.value) || 0}))} className="w-full bg-slate-700 text-white p-2 rounded" />
+                            </div>
+                            <div>
+                                <label className="block text-slate-300 text-sm mb-1">Sick Leave Balance (days)</label>
+                                <input type="number" step="0.5" value={editBalanceData.sickLeave ?? 0} onChange={e => setEditBalanceData(prev => ({...prev, sickLeave: parseFloat(e.target.value) || 0}))} className="w-full bg-slate-700 text-white p-2 rounded" />
+                            </div>
+                            <div>
+                                <label className="block text-slate-300 text-sm mb-1">Short Leave Balance (hours this month)</label>
+                                <input type="number" step="0.5" min="0" max="3" value={editBalanceData.shortLeave ?? 0} onChange={e => setEditBalanceData(prev => ({...prev, shortLeave: parseFloat(e.target.value) || 0}))} className="w-full bg-slate-700 text-white p-2 rounded" />
+                            </div>
                         </div>
                         <div className="mt-6 flex justify-end space-x-3">
                             <button onClick={() => setShowEditBalanceModal(false)} className="text-slate-400">Cancel</button>
@@ -1622,9 +1634,8 @@ export default function HRManagerDashboard() {
                                         className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
                                     >
                                         <option value="">Select Gender</option>
-                                        <option value="Male">Male</option>
-                                        <option value="Female">Female</option>
-                                        <option value="Other">Other</option>
+                                        <option value="male">Male</option>
+                                        <option value="female">Female</option>
                                     </select>
                                 </div>
 
@@ -1809,9 +1820,8 @@ export default function HRManagerDashboard() {
                                         className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
                                     >
                                         <option value="">Select Gender</option>
-                                        <option value="Male">Male</option>
-                                        <option value="Female">Female</option>
-                                        <option value="Other">Other</option>
+                                        <option value="male">Male</option>
+                                        <option value="female">Female</option>
                                     </select>
                                 </div>
 

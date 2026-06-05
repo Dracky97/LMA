@@ -11,7 +11,7 @@ const InputField = ({ label, type, value, onChange, placeholder, required = fals
       onChange={onChange}
       placeholder={placeholder}
       required={required}
-      className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+      className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
     />
   </div>
 );
@@ -104,7 +104,7 @@ export default function AuthPage({ title }) {
         
           <button
             type="submit"
-            className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition duration-150 ease-in-out"
+            className="w-full bg-[#411e75] text-white py-2 px-4 rounded-md hover:bg-[#5a2aa8] focus:outline-none focus:ring-2 focus:ring-[#c6a876] focus:ring-offset-2 transition duration-150 ease-in-out"
           >
             Login
           </button>
@@ -113,7 +113,7 @@ export default function AuthPage({ title }) {
             <button
               type="button"
               onClick={() => setShowForgotPassword(true)}
-              className="text-blue-400 hover:text-blue-300 text-sm underline focus:outline-none"
+              className="text-[#c6a876] hover:text-[#d4b888] text-sm underline focus:outline-none"
             >
               Forgot your password?
             </button>
@@ -151,10 +151,10 @@ export default function AuthPage({ title }) {
             <button
               type="submit"
               disabled={resetLoading}
-              className={`flex-1 py-2 px-4 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition duration-150 ease-in-out ${
+              className={`flex-1 py-2 px-4 rounded-md focus:outline-none focus:ring-2 focus:ring-[#c6a876] focus:ring-offset-2 transition duration-150 ease-in-out ${
                 resetLoading
                   ? 'bg-gray-400 cursor-not-allowed'
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  : 'bg-[#411e75] hover:bg-[#5a2aa8] text-white'
               }`}
             >
               {resetLoading ? (

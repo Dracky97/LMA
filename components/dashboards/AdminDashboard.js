@@ -51,7 +51,7 @@ export default function AdminDashboard() {
     const [newJoinedDate, setNewJoinedDate] = useState('');
     const [joinedDateReason, setJoinedDateReason] = useState('');
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
-    const { signup, userData: currentUserData } = useAuth();
+    const { userData: currentUserData } = useAuth();
 
     // Company-wide leave requests (for Admin cancellation feature)
     const [allRequests, setAllRequests] = useState([]);
@@ -530,22 +530,32 @@ export default function AdminDashboard() {
         setSuccess('');
 
         try {
-            await signup(
-                newUser.name,
-                newUser.email,
-                newUser.password,
-                newUser.department,
-                newUser.managerId || null,
-                newUser.employeeNumber || null,
-                newUser.gender || null,
-                newUser.designation || null,
-                newUser.birthday || null,
-                newUser.employeeStatus || 'probation',
-                newUser.joinedDate || null,
-                newUser.role || 'Employee'
-            );
+            const response = await fetch('/api/create-user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: newUser.name,
+                    email: newUser.email,
+                    password: newUser.password,
+                    department: newUser.department,
+                    managerId: newUser.managerId || null,
+                    employeeNumber: newUser.employeeNumber || null,
+                    gender: newUser.gender || null,
+                    designation: newUser.designation || null,
+                    birthday: newUser.birthday || null,
+                    employeeStatus: newUser.employeeStatus || 'probation',
+                    joinedDate: newUser.joinedDate || null,
+                    role: newUser.role || 'Employee',
+                }),
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result.error || 'Failed to add user');
+            }
+
             setSuccess('User added successfully!');
-            // Reset form
             setNewUser({
                 name: '',
                 email: '',
@@ -560,7 +570,6 @@ export default function AdminDashboard() {
                 joinedDate: '',
                 role: 'Employee'
             });
-            // Close the form after a short delay
             setTimeout(() => {
                 setShowAddUserForm(false);
                 setSuccess('');
@@ -641,7 +650,7 @@ export default function AdminDashboard() {
     return (
         <div className="space-y-6">
             {/* Leave Balance Reset Section */}
-            <div className="bg-card p-6 rounded-lg shadow-sm">
+            <div className="bg-card p-6 rounded-lg shadow-sm border border-white/5">
                 <div className="flex justify-between items-center mb-4">
                     <div>
                         <h2 className="text-xl font-semibold text-slate-200">System Management</h2>
@@ -679,7 +688,7 @@ export default function AdminDashboard() {
             </div>
 
             {/* Company-wide Leave History */}
-            <div className="bg-card p-6 rounded-lg shadow-sm">
+            <div className="bg-card p-6 rounded-lg shadow-sm border border-white/5">
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-xl font-semibold text-slate-200">Company-wide Leave History</h2>
                     <div className="text-sm text-slate-400">Total: {allRequests.length}</div>
@@ -694,12 +703,12 @@ export default function AdminDashboard() {
             </div>
 
             {/* User Management Section */}
-            <div className="bg-card p-6 rounded-lg shadow-sm">
+            <div className="bg-card p-6 rounded-lg shadow-sm border border-white/5">
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-xl font-semibold text-slate-200">User Management</h2>
                     <button
                         onClick={() => setShowAddUserForm(true)}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out"
+                        className="bg-[#411e75] hover:bg-[#5a2aa8] text-white px-4 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out"
                     >
                         Add New User
                     </button>
@@ -714,7 +723,7 @@ export default function AdminDashboard() {
                             placeholder="Search by name, email, or employee number..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                            className="w-full pl-10 pr-4 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                         />
                         <svg className="absolute left-3 top-2.5 h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -729,7 +738,7 @@ export default function AdminDashboard() {
                             <select
                                 value={roleFilter}
                                 onChange={(e) => setRoleFilter(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                             >
                                 <option value="">All Roles</option>
                                 {roleOptions.map(role => (
@@ -744,7 +753,7 @@ export default function AdminDashboard() {
                             <select
                                 value={departmentFilter}
                                 onChange={(e) => setDepartmentFilter(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                             >
                                 <option value="">All Departments</option>
                                 {departmentOptions.map(dept => (
@@ -759,7 +768,7 @@ export default function AdminDashboard() {
                             <select
                                 value={managerFilter}
                                 onChange={(e) => setManagerFilter(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                             >
                                 <option value="">All Managers</option>
                                 <option value="no-manager">No Manager</option>
@@ -834,7 +843,7 @@ export default function AdminDashboard() {
                                         value={newUser.name}
                                         onChange={handleAddUserChange}
                                         required
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                         placeholder="Enter full name"
                                     />
                                 </div>
@@ -847,7 +856,7 @@ export default function AdminDashboard() {
                                         value={newUser.email}
                                         onChange={handleAddUserChange}
                                         required
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                         placeholder="Enter email address"
                                     />
                                 </div>
@@ -860,7 +869,7 @@ export default function AdminDashboard() {
                                         value={newUser.password}
                                         onChange={handleAddUserChange}
                                         required
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                         placeholder="Enter password"
                                     />
                                 </div>
@@ -872,7 +881,7 @@ export default function AdminDashboard() {
                                         value={newUser.role}
                                         onChange={handleAddUserChange}
                                         required
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     >
                                         <option value="">Select Role</option>
                                         {roleOptions.map(role => (
@@ -888,7 +897,7 @@ export default function AdminDashboard() {
                                         value={newUser.department}
                                         onChange={handleAddUserChange}
                                         required
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     >
                                         <option value="">Select Department</option>
                                         {departmentOptions.map(dept => (
@@ -903,7 +912,7 @@ export default function AdminDashboard() {
                                         name="managerId"
                                         value={newUser.managerId}
                                         onChange={handleAddUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     >
                                         <option value="">No Manager (Top Level)</option>
                                         {managers.map(manager => (
@@ -921,7 +930,7 @@ export default function AdminDashboard() {
                                         name="employeeNumber"
                                         value={newUser.employeeNumber}
                                         onChange={handleAddUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                         placeholder="Enter employee number"
                                     />
                                 </div>
@@ -933,7 +942,7 @@ export default function AdminDashboard() {
                                         value={newUser.gender}
                                         onChange={handleAddUserChange}
                                         required
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     >
                                         <option value="">Select Gender</option>
                                         <option value="male">Male</option>
@@ -948,7 +957,7 @@ export default function AdminDashboard() {
                                         name="designation"
                                         value={newUser.designation}
                                         onChange={handleAddUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                         placeholder="e.g., Senior Developer, Marketing Specialist"
                                     />
                                 </div>
@@ -960,7 +969,7 @@ export default function AdminDashboard() {
                                         name="birthday"
                                         value={newUser.birthday}
                                         onChange={handleAddUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     />
                                 </div>
 
@@ -971,7 +980,7 @@ export default function AdminDashboard() {
                                         value={newUser.employeeStatus}
                                         onChange={handleAddUserChange}
                                         required
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     >
                                         <option value="permanent">Permanent</option>
                                         <option value="probation">Probation</option>
@@ -986,7 +995,7 @@ export default function AdminDashboard() {
                                         name="joinedDate"
                                         value={newUser.joinedDate}
                                         onChange={handleAddUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     />
                                 </div>
 
@@ -1004,7 +1013,7 @@ export default function AdminDashboard() {
                                     </button>
                                     <button
                                         type="submit"
-                                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-150 ease-in-out"
+                                        className="px-4 py-2 bg-[#411e75] text-white rounded-md hover:bg-[#5a2aa8] focus:outline-none focus:ring-2 focus:ring-[#c6a876] transition duration-150 ease-in-out"
                                     >
                                         Add User
                                     </button>
@@ -1118,7 +1127,7 @@ export default function AdminDashboard() {
                                             name="name"
                                             value={editUserData.name}
                                             onChange={handleEditUserChange}
-                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-[#411e75]"
                                         />
                                     </div>
                                     
@@ -1129,7 +1138,7 @@ export default function AdminDashboard() {
                                             name="email"
                                             value={editUserData.email}
                                             onChange={handleEditUserChange}
-                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-[#411e75]"
                                         />
                                     </div>
                                     
@@ -1139,7 +1148,7 @@ export default function AdminDashboard() {
                                             name="role"
                                             value={editUserData.role}
                                             onChange={handleEditUserChange}
-                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-[#411e75]"
                                         >
                                             {roleOptions.map(role => (
                                                 <option key={role} value={role}>{role}</option>
@@ -1153,7 +1162,7 @@ export default function AdminDashboard() {
                                             name="department"
                                             value={editUserData.department}
                                             onChange={handleEditUserChange}
-                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-[#411e75]"
                                         >
                                             <option value="">Select Department</option>
                                             {departmentOptions.map(dept => (
@@ -1169,7 +1178,7 @@ export default function AdminDashboard() {
                                             name="designation"
                                             value={editUserData.designation}
                                             onChange={handleEditUserChange}
-                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-[#411e75]"
                                         />
                                     </div>
                                     
@@ -1180,7 +1189,7 @@ export default function AdminDashboard() {
                                             name="employeeNumber"
                                             value={editUserData.employeeNumber}
                                             onChange={handleEditUserChange}
-                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-[#411e75]"
                                         />
                                     </div>
                                     
@@ -1190,7 +1199,7 @@ export default function AdminDashboard() {
                                             name="gender"
                                             value={editUserData.gender}
                                             onChange={handleEditUserChange}
-                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-[#411e75]"
                                         >
                                             <option value="">Select Gender</option>
                                             <option value="male">Male</option>
@@ -1204,7 +1213,7 @@ export default function AdminDashboard() {
                                             name="managerId"
                                             value={editUserData.managerId}
                                             onChange={handleEditUserChange}
-                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-[#411e75]"
                                         >
                                             <option value="">No Manager (Top Level)</option>
                                             {managers.map(manager => (
@@ -1227,7 +1236,7 @@ export default function AdminDashboard() {
                                             name="phone"
                                             value={editUserData.personalDetails?.phone || ''}
                                             onChange={(e) => handleEditUserChange(e, 'personalDetails')}
-                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-[#411e75]"
                                         />
                                     </div>
                                     
@@ -1237,7 +1246,7 @@ export default function AdminDashboard() {
                                             name="address"
                                             value={editUserData.personalDetails?.address || ''}
                                             onChange={(e) => handleEditUserChange(e, 'personalDetails')}
-                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-[#411e75]"
                                             rows="2"
                                         />
                                     </div>
@@ -1249,7 +1258,7 @@ export default function AdminDashboard() {
                                             name="dob"
                                             value={editUserData.personalDetails?.dob || ''}
                                             onChange={(e) => handleEditUserChange(e, 'personalDetails')}
-                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-[#411e75]"
                                         />
                                     </div>
 
@@ -1260,7 +1269,7 @@ export default function AdminDashboard() {
                                             name="joinedDate"
                                             value={editUserData.joinedDate ? new Date(editUserData.joinedDate).toISOString().split('T')[0] : ''}
                                             onChange={handleEditUserChange}
-                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-[#411e75]"
                                         />
                                     </div>
                                     
@@ -1276,7 +1285,7 @@ export default function AdminDashboard() {
                                                 step="0.5"
                                                 value={balance}
                                                 onChange={(e) => handleLeaveBalanceChange(leaveType, e.target.value)}
-                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                className="w-full px-3 py-2 border border-gray-600 rounded-md text-slate-200 bg-card focus:outline-none focus:ring-2 focus:ring-[#411e75]"
                                             />
                                         </div>
                                     ))}
@@ -1337,7 +1346,7 @@ export default function AdminDashboard() {
                                 </button>
                                 <button
                                     onClick={saveUserChanges}
-                                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-150 ease-in-out"
+                                    className="px-4 py-2 bg-[#411e75] text-white rounded-md hover:bg-[#5a2aa8] focus:outline-none focus:ring-2 focus:ring-[#c6a876] transition duration-150 ease-in-out"
                                 >
                                     Save Changes
                                 </button>
@@ -1390,7 +1399,7 @@ export default function AdminDashboard() {
                                 <select
                                     value={newStatus}
                                     onChange={(e) => setNewStatus(e.target.value)}
-                                    className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                 >
                                     <option value="">Select New Status</option>
                                     <option value="permanent">Permanent</option>
@@ -1404,7 +1413,7 @@ export default function AdminDashboard() {
                                 <textarea
                                     value={statusChangeReason}
                                     onChange={(e) => setStatusChangeReason(e.target.value)}
-                                    className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     rows="3"
                                     placeholder="Enter reason for status change..."
                                 />
@@ -1482,7 +1491,7 @@ export default function AdminDashboard() {
                                     type="date"
                                     value={newJoinedDate}
                                     onChange={(e) => setNewJoinedDate(e.target.value)}
-                                    className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                 />
                             </div>
 
@@ -1491,7 +1500,7 @@ export default function AdminDashboard() {
                                 <textarea
                                     value={joinedDateReason}
                                     onChange={(e) => setJoinedDateReason(e.target.value)}
-                                    className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     rows="3"
                                     placeholder="Enter reason for joined date change..."
                                 />
@@ -1579,7 +1588,7 @@ export default function AdminDashboard() {
                     </thead>
                     <tbody className="bg-card divide-y divide-gray-700">
                         {filteredUsers.filter(user => !user.deleted).map(user => (
-                            <tr key={user.id}>
+                            <tr key={user.id} className="hover:bg-white/5 transition-colors">
                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-200">
                                     <div>
                                         <div className="font-medium">{user.name}</div>

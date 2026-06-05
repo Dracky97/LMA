@@ -7,7 +7,7 @@ export default function DarkModeToggle() {
   return (
     <button
       onClick={() => setDarkMode(!darkMode)}
-      className="p-2 rounded-md bg-muted text-muted-foreground hover:bg-muted-foreground hover:text-muted focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+      className="p-2 rounded-md bg-muted text-muted-foreground hover:bg-muted-foreground hover:text-muted focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#411e75]"
       aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
     >
       {darkMode ? (

@@ -13,6 +13,16 @@ import {
 import { app } from '../lib/firebase-client';
 import { useAuth } from '../context/AuthContext';
 
+// Leave type colours for team calendar badges
+const LEAVE_COLORS = {
+    'Annual Leave':   { bg: 'bg-blue-700',   text: 'text-blue-100' },
+    'Casual Leave':   { bg: 'bg-green-700',  text: 'text-green-100' },
+    'Sick Leave':     { bg: 'bg-red-700',    text: 'text-red-100' },
+    'Unpaid Leave':   { bg: 'bg-orange-700', text: 'text-orange-100' },
+    'Short Leave':    { bg: 'bg-purple-700', text: 'text-purple-100' },
+    'default':        { bg: 'bg-slate-600',  text: 'text-slate-100' },
+};
+
 const db = getFirestore(app);
 
 // Holiday type definitions
@@ -77,6 +87,67 @@ export default function CalendarView() {
     const [deleteConfirm, setDeleteConfirm] = useState(null);
 
     const isAdminOrHR = userData?.role === 'Admin' || userData?.role === 'Manager HR';
+    // Only managers, HR, and admins may see the Team Leave view
+    const canViewTeamLeave = isAdminOrHR || userData?.isManager === true;
+
+    // Team leave state
+    const [allLeaveRequests, setAllLeaveRequests] = useState([]);
+    const [allUsers, setAllUsers] = useState({});
+    const [teamLeaveFilter, setTeamLeaveFilter] = useState('approved'); // 'approved' | 'all'
+
+    // Only fetch team leave data for users who are permitted to see it
+    useEffect(() => {
+        if (!userData?.uid || !canViewTeamLeave) return;
+        const reqUnsub = onSnapshot(collection(db, 'leaveRequests'), (snap) => {
+            setAllLeaveRequests(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
+        const usrUnsub = onSnapshot(collection(db, 'users'), (snap) => {
+            const map = {};
+            snap.docs.forEach(d => { map[d.id] = { uid: d.id, ...d.data() }; });
+            setAllUsers(map);
+        });
+        return () => { reqUnsub(); usrUnsub(); };
+    }, [userData?.uid, canViewTeamLeave]);
+
+    // Filter requests to the current user's team scope
+    const teamRequests = useMemo(() => {
+        if (!userData?.uid || !canViewTeamLeave) return [];
+        let filtered = allLeaveRequests;
+        // Status filter
+        if (teamLeaveFilter === 'approved') {
+            filtered = filtered.filter(r => r.status === 'Approved');
+        } else {
+            filtered = filtered.filter(r => r.status === 'Approved' || r.status === 'Pending' || r.status === 'Pending HR Approval');
+        }
+        // Scope: HR/Admin see all; managers see their direct reports only
+        if (!isAdminOrHR) {
+            filtered = filtered.filter(r => r.managerId === userData.uid || r.userId === userData.uid);
+        }
+        return filtered;
+    }, [allLeaveRequests, allUsers, userData, isAdminOrHR, canViewTeamLeave, teamLeaveFilter]);
+
+    // Build a map: dateKey -> [{userId, name, leaveType, status}]
+    const teamLeaveMap = useMemo(() => {
+        const map = {};
+        teamRequests.forEach(req => {
+            if (!req.startDate || !req.endDate) return;
+            const start = req.startDate.toDate ? req.startDate.toDate() : new Date(req.startDate);
+            const end   = req.endDate.toDate   ? req.endDate.toDate()   : new Date(req.endDate);
+            const user  = allUsers[req.userId];
+            const name  = user?.name || req.userName || 'Unknown';
+            const cur = new Date(start);
+            cur.setHours(0, 0, 0, 0);
+            const endDay = new Date(end);
+            endDay.setHours(0, 0, 0, 0);
+            while (cur <= endDay) {
+                const key = toDateKey(cur.getFullYear(), cur.getMonth(), cur.getDate());
+                if (!map[key]) map[key] = [];
+                map[key].push({ userId: req.userId, name, leaveType: req.type || 'Annual Leave', status: req.status });
+                cur.setDate(cur.getDate() + 1);
+            }
+        });
+        return map;
+    }, [teamRequests, allUsers]);
 
     // Fetch holidays from Firestore
     useEffect(() => {
@@ -523,6 +594,125 @@ export default function CalendarView() {
         );
     }
 
+    function renderTeamCalendarGrid() {
+        const daysInMonth = getDaysInMonth(currentYear, currentMonth);
+        const firstDay = getFirstDayOfMonth(currentYear, currentMonth);
+        const cells = [];
+
+        for (let i = 0; i < firstDay; i++) {
+            cells.push(<div key={`te-${i}`} className="h-32 border border-gray-800 bg-card rounded" />);
+        }
+
+        for (let day = 1; day <= daysInMonth; day++) {
+            const key = toDateKey(currentYear, currentMonth, day);
+            const dayLeave   = teamLeaveMap[key] || [];
+            const dayHoliday = holidayMap[key] || [];
+            const isToday    = today.getFullYear() === currentYear && today.getMonth() === currentMonth && today.getDate() === day;
+            const isSunday   = new Date(currentYear, currentMonth, day).getDay() === 0;
+
+            cells.push(
+                <div
+                    key={day}
+                    className={`h-32 border rounded p-1 overflow-hidden ${isSunday ? 'border-gray-700 bg-gray-900' : 'border-gray-800 bg-card'}`}
+                >
+                    <div className="flex justify-between items-start mb-1">
+                        <span className={`text-xs font-medium leading-none
+                            ${isToday ? 'bg-[#411e75] text-white rounded-full w-5 h-5 flex items-center justify-center' : ''}
+                            ${isSunday ? 'text-slate-500' : 'text-slate-300'}`}>
+                            {day}
+                        </span>
+                        {dayHoliday.length > 0 && (
+                            <span className="text-[9px] bg-amber-900/50 text-amber-300 px-1 rounded truncate max-w-[60%]">
+                                {dayHoliday[0].name}
+                            </span>
+                        )}
+                    </div>
+                    <div className="space-y-0.5 overflow-hidden">
+                        {dayLeave.slice(0, 3).map((entry, i) => {
+                            const c = LEAVE_COLORS[entry.leaveType] || LEAVE_COLORS['default'];
+                            const initials = entry.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+                            return (
+                                <div key={i} title={`${entry.name} — ${entry.leaveType}`}
+                                    className={`flex items-center gap-1 px-1 rounded text-[10px] leading-tight truncate ${c.bg} ${c.text}`}>
+                                    <span className="font-bold shrink-0">{initials}</span>
+                                    <span className="truncate">{entry.name.split(' ')[0]}</span>
+                                </div>
+                            );
+                        })}
+                        {dayLeave.length > 3 && (
+                            <div className="text-[10px] text-slate-500">+{dayLeave.length - 3} more</div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        return (
+            <div className="mt-2">
+                <div className="grid grid-cols-7 mb-1">
+                    {DAYS_OF_WEEK.map(d => (
+                        <div key={d} className={`text-center text-xs font-medium py-2 ${d === 'Sun' ? 'text-slate-500' : d === 'Sat' ? 'text-amber-400' : 'text-slate-400'}`}>{d}</div>
+                    ))}
+                </div>
+                <div className="grid grid-cols-7 gap-1">{cells}</div>
+            </div>
+        );
+    }
+
+    function renderTeamView() {
+        // Who is on leave today?
+        const todayKey = toDateKey(today.getFullYear(), today.getMonth(), today.getDate());
+        const onLeaveToday = teamLeaveMap[todayKey] || [];
+
+        return (
+            <div>
+                {/* Filter + legend row */}
+                <div className="flex flex-wrap items-center gap-3 mb-4">
+                    <div className="flex border border-gray-700 rounded-lg overflow-hidden text-xs">
+                        <button
+                            onClick={() => setTeamLeaveFilter('approved')}
+                            className={`px-3 py-1.5 font-medium transition-colors ${teamLeaveFilter === 'approved' ? 'bg-[#411e75] text-white' : 'text-slate-400 hover:text-white'}`}
+                        >
+                            Approved only
+                        </button>
+                        <button
+                            onClick={() => setTeamLeaveFilter('all')}
+                            className={`px-3 py-1.5 font-medium transition-colors ${teamLeaveFilter === 'all' ? 'bg-[#411e75] text-white' : 'text-slate-400 hover:text-white'}`}
+                        >
+                            Include pending
+                        </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        {Object.entries(LEAVE_COLORS).filter(([k]) => k !== 'default').map(([type, c]) => (
+                            <div key={type} className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded ${c.bg} ${c.text}`}>
+                                {type}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* On leave today banner */}
+                {onLeaveToday.length > 0 && (
+                    <div className="mb-4 bg-blue-900/20 border border-blue-800 rounded-lg px-4 py-3">
+                        <p className="text-xs font-semibold text-blue-300 mb-2">On leave today ({onLeaveToday.length})</p>
+                        <div className="flex flex-wrap gap-2">
+                            {onLeaveToday.map((e, i) => {
+                                const c = LEAVE_COLORS[e.leaveType] || LEAVE_COLORS['default'];
+                                return (
+                                    <span key={i} className={`text-xs px-2 py-0.5 rounded ${c.bg} ${c.text}`}>
+                                        {e.name} · {e.leaveType}
+                                    </span>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
+                {renderTeamCalendarGrid()}
+            </div>
+        );
+    }
+
     // Upcoming holidays (next 5 from today)
     const upcomingHolidays = useMemo(() => {
         const todayKey = toDateKey(today.getFullYear(), today.getMonth(), today.getDate());
@@ -569,6 +759,14 @@ export default function CalendarView() {
                         >
                             List
                         </button>
+                        {canViewTeamLeave && (
+                            <button
+                                onClick={() => setViewMode('team')}
+                                className={`px-3 py-2 text-xs font-medium transition-colors ${viewMode === 'team' ? 'bg-[#411e75] text-white' : 'text-slate-400 hover:text-white'}`}
+                            >
+                                Team Leave
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
@@ -629,6 +827,10 @@ export default function CalendarView() {
                     <>
                         {renderCalendarGrid()}
                         {renderSelectedDayPanel()}
+                    </>
+                ) : viewMode === 'team' && canViewTeamLeave ? (
+                    <>
+                        {renderTeamView()}
                     </>
                 ) : (
                     renderListView()

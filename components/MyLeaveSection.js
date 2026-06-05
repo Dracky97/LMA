@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { getFirestore, collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
+import { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { app } from '../lib/firebase-client';
 import { LEAVE_CONFIG, getCurrentMonthShortLeaveUsage } from '../lib/leavePolicy';
+import { LEAVE_TYPE_MAP } from '../lib/leaveTypes';
 import LeaveBalanceCard from './LeaveBalanceCard';
 import LeaveHistoryTable from './LeaveHistoryTable';
 import LeaveRequestModal from './LeaveRequestModal';
@@ -65,6 +66,31 @@ export default function MyLeaveSection() {
         cancelledBy: userData.name,
         cancellationDate: new Date().toISOString()
       });
+
+      if (request.status === 'Approved') {
+        const userRef = doc(db, 'users', userData.uid);
+        const userDoc = await getDoc(userRef);
+        if (userDoc.exists()) {
+          const currentData = userDoc.data();
+          const leaveType = LEAVE_TYPE_MAP[request.type] || request.type.toLowerCase().replace(/\s+/g, '');
+          const currentBalance = currentData.leaveBalance?.[leaveType] ?? 0;
+
+          let duration;
+          if (request.type === 'Short Leave') {
+            duration = parseFloat(request.totalHours) || 0;
+          } else {
+            duration = request.leaveUnits !== undefined && request.leaveUnits > 0
+              ? request.leaveUnits
+              : Math.ceil((request.endDate.toDate() - request.startDate.toDate()) / (1000 * 60 * 60 * 24));
+          }
+
+          const isAccruingType = leaveType === 'leave in-lieu' || leaveType === 'other';
+          const newBalance = isAccruingType ? currentBalance - duration : currentBalance + duration;
+
+          await updateDoc(userRef, { [`leaveBalance.${leaveType}`]: newBalance });
+        }
+      }
+
       setCancelSuccess('Leave request cancelled successfully.');
       setTimeout(() => setCancelSuccess(''), 4000);
     } catch (error) {
@@ -91,13 +117,13 @@ export default function MyLeaveSection() {
   return (
     <div className="space-y-8">
       <LeaveBalanceCard balances={calculatedBalances} gender={userData.gender} userData={userData} />
-      <div className="bg-card p-6 rounded-lg shadow-sm">
+      <div className="bg-card p-6 rounded-lg shadow-sm border border-white/5">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold text-slate-200">My Leave Requests</h2>
           {userData.role !== 'CEO' && (
             <button
               onClick={() => setShowModal(true)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              className="bg-[#411e75] text-white px-4 py-2 rounded-md hover:bg-[#5a2aa8] focus:outline-none focus:ring-2 focus:ring-[#c6a876] focus:ring-offset-2 transition duration-150 ease-in-out"
             >
               Apply for Leave
             </button>

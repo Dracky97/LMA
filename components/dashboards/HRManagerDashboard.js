@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { useAuth } from '../../context/AuthContext';
-import { getFirestore, collection, onSnapshot, doc, updateDoc, getDoc, addDoc } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, doc, updateDoc, getDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { app } from '../../lib/firebase-client';
 import ManagerRequestsTable from '../ManagerRequestsTable';
 import LeaveHistoryTable from '../LeaveHistoryTable';
@@ -11,12 +11,11 @@ import LeavePolicyInfo, { LeavePolicyReference } from '../LeavePolicyInfo';
 import { LEAVE_TYPE_MAP, validateLeaveType, LEAVE_TYPES } from '../../lib/leaveTypes';
 import { calculateLeaveBalances, calculateLeaveEntitlements, LEAVE_CONFIG } from '../../lib/leavePolicy';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 
 const db = getFirestore(app);
 
 export default function HRManagerDashboard() {
-    const { userData, signup } = useAuth();
+    const { userData } = useAuth();
     const router = useRouter();
     
     // --- State Management ---
@@ -229,17 +228,32 @@ export default function HRManagerDashboard() {
         }
     };
 
+    const sendNotification = async (recipientId, type, title, message) => {
+        try {
+            await addDoc(collection(db, 'notifications'), {
+                recipientId,
+                type,
+                title,
+                message,
+                read: false,
+                createdAt: serverTimestamp(),
+            });
+        } catch (e) {
+            console.warn('Could not send notification:', e.message);
+        }
+    };
+
     const handleFinalApproval = async (requestId, newStatus, rejectionReason = '') => {
         try {
             setMessage(null);
             const requestRef = doc(db, "leaveRequests", requestId);
             const request = allRequests.find(r => r.id === requestId);
-            
+
             if (!request) throw new Error('Request not found');
 
             if (newStatus === 'Approved') {
                 const isUnpaidLeave = request.type === 'Unpaid Leave';
-                
+
                 if (isUnpaidLeave) {
                     await updateDoc(requestRef, {
                         hrManagerApproval: 'Approved',
@@ -248,6 +262,12 @@ export default function HRManagerDashboard() {
                         hrApprovalDate: new Date().toISOString(),
                         rejectionReason: ''
                     });
+                    await sendNotification(
+                        request.userId,
+                        'leave_approved',
+                        'Leave Request Approved',
+                        `Your ${request.type} request has been approved by HR.`
+                    );
                     setMessage({ type: 'success', text: 'Unpaid leave request approved. No balance deduction.' });
                 } else {
                     await updateDoc(requestRef, {
@@ -257,9 +277,15 @@ export default function HRManagerDashboard() {
                         hrApprovalDate: new Date().toISOString(),
                         rejectionReason: ''
                     });
-                    
+
                     // Deduct balance
                     await deductLeaveBalance(request);
+                    await sendNotification(
+                        request.userId,
+                        'leave_approved',
+                        'Leave Request Approved',
+                        `Your ${request.type} request has been approved by HR.`
+                    );
                     setMessage({ type: 'success', text: 'Leave request approved and balance deducted.' });
                 }
             } else {
@@ -270,6 +296,12 @@ export default function HRManagerDashboard() {
                     hrApprovalDate: new Date().toISOString(),
                     rejectionReason: rejectionReason?.trim() || ''
                 });
+                await sendNotification(
+                    request.userId,
+                    'leave_rejected',
+                    'Leave Request Rejected',
+                    `Your ${request.type} request was rejected by HR.${rejectionReason ? ` Reason: ${rejectionReason}` : ''}`
+                );
                 setMessage({ type: 'success', text: 'Leave request rejected by HR.' });
             }
         } catch (error) {
@@ -636,10 +668,12 @@ export default function HRManagerDashboard() {
                 try {
                     if (!user.joinedDate) continue;
 
-                    const userRequests = allRequests.filter(r => 
-                        r.userId === user.uid && 
-                        new Date(r.startDate).getFullYear() === new Date().getFullYear()
-                    );
+                    const currentYear = new Date().getFullYear();
+                    const userRequests = allRequests.filter(r => {
+                        if (!r.startDate) return false;
+                        const d = r.startDate.toDate ? r.startDate.toDate() : new Date(r.startDate);
+                        return r.userId === user.uid && d.getFullYear() === currentYear;
+                    });
 
                     const calculated = calculateLeaveBalances({ ...user, joinDate: user.joinedDate }, userRequests);
                     
@@ -776,21 +810,32 @@ export default function HRManagerDashboard() {
         setSuccess('');
 
         try {
-            await signup(
-                newUser.name,
-                newUser.email,
-                newUser.password,
-                newUser.department,
-                newUser.managerId || null,
-                newUser.employeeNumber || null,
-                newUser.gender || null,
-                newUser.designation || null,
-                newUser.birthday || null,
-                newUser.employeeStatus || 'probation',
-                newUser.joinedDate || null
-            );
+            const response = await fetch('/api/create-user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: newUser.name,
+                    email: newUser.email,
+                    password: newUser.password,
+                    department: newUser.department,
+                    managerId: newUser.managerId || null,
+                    employeeNumber: newUser.employeeNumber || null,
+                    gender: newUser.gender || null,
+                    designation: newUser.designation || null,
+                    birthday: newUser.birthday || null,
+                    employeeStatus: newUser.employeeStatus || 'probation',
+                    joinedDate: newUser.joinedDate || null,
+                    role: newUser.role || 'Employee',
+                }),
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result.error || 'Failed to add user');
+            }
+
             setSuccess('User added successfully!');
-            // Reset form
             setNewUser({
                 name: '',
                 email: '',
@@ -805,7 +850,6 @@ export default function HRManagerDashboard() {
                 joinedDate: '',
                 role: 'Employee'
             });
-            // Close the form after a short delay
             setTimeout(() => {
                 setShowAddUserForm(false);
                 setSuccess('');
@@ -926,12 +970,12 @@ export default function HRManagerDashboard() {
             {/* Navigation Tabs */}
             <div className="border-b border-gray-700">
                 <nav className="-mb-px flex space-x-8">
-                    {['requests', 'balances', 'history', 'reports', 'manual', 'users', 'policy'].map(tab => (
+                    {['requests', 'balances', 'history', 'reports', 'analytics', 'manual', 'users', 'policy'].map(tab => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
                             className={`py-4 px-1 border-b-2 font-medium text-sm capitalize ${
-                                activeTab === tab ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-300'
+                                activeTab === tab ? 'border-[#c6a876] text-[#c6a876]' : 'border-transparent text-slate-500 hover:text-slate-300'
                             }`}
                         >
                             {tab} {tab === 'requests' && `(${pendingFinalHRRequests.length})`}
@@ -943,13 +987,13 @@ export default function HRManagerDashboard() {
             <div className="flex justify-end">
                 <button
                     onClick={() => setShowLeaveModal(true)}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
+                    className="bg-[#411e75] text-white px-4 py-2 rounded-md hover:bg-[#5a2aa8]"
                 >
                     Apply for Leave
                 </button>
             </div>
 
-            <div className="bg-card rounded-lg shadow-sm">
+            <div className="bg-card rounded-lg shadow-sm border border-white/5">
                 
                 {/* 1. REQUESTS TAB */}
                 {activeTab === 'requests' && (
@@ -987,7 +1031,7 @@ export default function HRManagerDashboard() {
                                     {Object.values(filteredUsers).map(user => (
                                         <tr key={user.uid || user.id}>
                                             <td className="px-6 py-4">
-                                                <button onClick={() => openEditBalanceModal(user)} className="text-blue-400 hover:text-blue-300">Edit</button>
+                                                <button onClick={() => openEditBalanceModal(user)} className="text-[#c6a876] hover:text-[#d4b888]">Edit</button>
                                             </td>
                                             <td className="px-6 py-4 text-slate-200">
                                                 <button onClick={() => handleProfileClick(user.uid)} className="hover:underline">{user.name}</button>
@@ -1003,7 +1047,7 @@ export default function HRManagerDashboard() {
                                                 ) : (
                                                     <div className="flex space-x-2">
                                                         <span>{user.joinedDate ? new Date(user.joinedDate).toLocaleDateString() : '-'}</span>
-                                                        <button onClick={() => handleEditJoinedDate(user)} className="text-blue-400 text-xs">Edit</button>
+                                                        <button onClick={() => handleEditJoinedDate(user)} className="text-[#c6a876] hover:text-[#d4b888] text-xs">Edit</button>
                                                     </div>
                                                 )}
                                             </td>
@@ -1029,15 +1073,15 @@ export default function HRManagerDashboard() {
                 {activeTab === 'reports' && (
                     <div className="p-6">
                         <div className="border-b border-gray-700 mb-6 flex space-x-4">
-                            <button onClick={() => setActiveReportTab('generate')} className={activeReportTab === 'generate' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-slate-500'}>Generate</button>
-                            <button onClick={() => setActiveReportTab('view')} disabled={!monthlyReport} className={activeReportTab === 'view' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-slate-500'}>View Report</button>
+                            <button onClick={() => setActiveReportTab('generate')} className={activeReportTab === 'generate' ? 'text-[#c6a876] border-b-2 border-[#c6a876]' : 'text-slate-500'}>Generate</button>
+                            <button onClick={() => setActiveReportTab('view')} disabled={!monthlyReport} className={activeReportTab === 'view' ? 'text-[#c6a876] border-b-2 border-[#c6a876]' : 'text-slate-500'}>View Report</button>
                         </div>
                         
                         {activeReportTab === 'generate' && (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="bg-muted p-6 rounded">
                                     <h3 className="text-slate-200 mb-4">Current Month</h3>
-                                    <button onClick={() => generateMonthlyReport(false)} disabled={isGeneratingReport} className="bg-blue-600 text-white px-4 py-2 rounded">
+                                    <button onClick={() => generateMonthlyReport(false)} disabled={isGeneratingReport} className="bg-[#411e75] text-white px-4 py-2 rounded">
                                         {isGeneratingReport ? 'Generating...' : 'Generate Standard Report'}
                                     </button>
                                 </div>
@@ -1252,7 +1296,131 @@ export default function HRManagerDashboard() {
                     </div>
                 )}
 
-                {/* 5. MANUAL TAB */}
+                {/* 5. ANALYTICS TAB */}
+                {activeTab === 'analytics' && (() => {
+                    const approvedReqs = allRequests.filter(r => r.status === 'Approved');
+
+                    // Department breakdown
+                    const deptMap = {};
+                    approvedReqs.forEach(r => {
+                        const u = users[r.userId];
+                        const dept = u?.department || 'Unknown';
+                        deptMap[dept] = (deptMap[dept] || 0) + (parseFloat(r.leaveUnits) || 1);
+                    });
+                    const deptEntries = Object.entries(deptMap).sort((a, b) => b[1] - a[1]);
+                    const deptMax = deptEntries[0]?.[1] || 1;
+
+                    // Leave type breakdown
+                    const typeMap = {};
+                    approvedReqs.forEach(r => {
+                        const t = r.type || 'Unknown';
+                        typeMap[t] = (typeMap[t] || 0) + (parseFloat(r.leaveUnits) || 1);
+                    });
+                    const typeEntries = Object.entries(typeMap).sort((a, b) => b[1] - a[1]);
+                    const typeMax = typeEntries[0]?.[1] || 1;
+
+                    // Monthly trend (current year)
+                    const currentYear = new Date().getFullYear();
+                    const monthMap = Array(12).fill(0);
+                    approvedReqs.forEach(r => {
+                        if (!r.startDate) return;
+                        const d = r.startDate.toDate ? r.startDate.toDate() : new Date(r.startDate);
+                        if (d.getFullYear() === currentYear) {
+                            monthMap[d.getMonth()] += parseFloat(r.leaveUnits) || 1;
+                        }
+                    });
+                    const monthMax = Math.max(...monthMap, 1);
+                    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+                    // Summary stats
+                    const totalUsers = Object.keys(users).length;
+                    const usersWithLeave = new Set(approvedReqs.map(r => r.userId)).size;
+                    const totalDays = approvedReqs.reduce((s, r) => s + (parseFloat(r.leaveUnits) || 0), 0);
+                    const pendingCount = allRequests.filter(r => r.status === 'Pending' || r.status === 'Pending HR Approval').length;
+
+                    return (
+                        <div className="p-6 space-y-8">
+                            {/* KPI cards */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                                {[
+                                    { label: 'Total Leave Days', value: totalDays.toFixed(1), color: 'text-[#c6a876]', bg: 'bg-purple-900/20' },
+                                    { label: 'Employees on Leave (ever)', value: usersWithLeave, color: 'text-green-400', bg: 'bg-green-900/20' },
+                                    { label: 'Pending Requests', value: pendingCount, color: 'text-yellow-400', bg: 'bg-yellow-900/20' },
+                                    { label: 'Total Employees', value: totalUsers, color: 'text-purple-400', bg: 'bg-purple-900/20' },
+                                ].map(kpi => (
+                                    <div key={kpi.label} className={`${kpi.bg} rounded-lg p-4`}>
+                                        <div className={`text-2xl font-bold ${kpi.color}`}>{kpi.value}</div>
+                                        <div className="text-xs text-slate-400 mt-1">{kpi.label}</div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Monthly trend */}
+                            <div>
+                                <h4 className="text-sm font-semibold text-slate-200 mb-3">Monthly Leave Days — {currentYear}</h4>
+                                <div className="flex items-end gap-1 h-32">
+                                    {monthMap.map((val, i) => (
+                                        <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                                            <span className="text-[10px] text-slate-400">{val > 0 ? val.toFixed(0) : ''}</span>
+                                            <div
+                                                className="w-full rounded-t bg-[#411e75] opacity-80 hover:opacity-100 transition-all"
+                                                style={{ height: `${Math.max(4, (val / monthMax) * 100)}%` }}
+                                                title={`${monthNames[i]}: ${val.toFixed(1)} days`}
+                                            />
+                                            <span className="text-[10px] text-slate-500">{monthNames[i]}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
+                                {/* Department breakdown */}
+                                <div>
+                                    <h4 className="text-sm font-semibold text-slate-200 mb-3">Leave Days by Department</h4>
+                                    <div className="space-y-2">
+                                        {deptEntries.slice(0, 10).map(([dept, days]) => (
+                                            <div key={dept}>
+                                                <div className="flex justify-between text-xs text-slate-400 mb-0.5">
+                                                    <span className="truncate mr-2">{dept}</span>
+                                                    <span className="shrink-0">{days.toFixed(1)}d</span>
+                                                </div>
+                                                <div className="w-full bg-gray-800 rounded-full h-2">
+                                                    <div
+                                                        className="bg-[#c6a876] h-2 rounded-full"
+                                                        style={{ width: `${(days / deptMax) * 100}%` }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Leave type breakdown */}
+                                <div>
+                                    <h4 className="text-sm font-semibold text-slate-200 mb-3">Leave Days by Type</h4>
+                                    <div className="space-y-2">
+                                        {typeEntries.map(([type, days]) => (
+                                            <div key={type}>
+                                                <div className="flex justify-between text-xs text-slate-400 mb-0.5">
+                                                    <span className="truncate mr-2">{type}</span>
+                                                    <span className="shrink-0">{days.toFixed(1)}d</span>
+                                                </div>
+                                                <div className="w-full bg-gray-800 rounded-full h-2">
+                                                    <div
+                                                        className="bg-blue-500 h-2 rounded-full"
+                                                        style={{ width: `${(days / typeMax) * 100}%` }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })()}
+
+                {/* 7. MANUAL TAB */}
                 {activeTab === 'manual' && (
                     <div className="p-6">
                         <form onSubmit={handleManualLeaveSubmit} className="space-y-4 max-w-xl">
@@ -1278,7 +1446,7 @@ export default function HRManagerDashboard() {
                             </div>
                             <input type="number" step="0.5" placeholder="Units (Days)" value={manualLeaveData.leaveUnits || ''} onChange={e => setManualLeaveData(prev => ({...prev, leaveUnits: e.target.value}))} className="w-full p-2 bg-card rounded text-slate-200 border border-gray-600" />
                             <textarea placeholder="Reason" value={manualLeaveData.reason || ''} onChange={e => setManualLeaveData(prev => ({...prev, reason: e.target.value}))} className="w-full p-2 bg-card rounded text-slate-200 border border-gray-600" />
-                            <button type="submit" disabled={isSubmittingManualLeave} className="bg-blue-600 text-white px-4 py-2 rounded">Submit Manual Leave</button>
+                            <button type="submit" disabled={isSubmittingManualLeave} className="bg-[#411e75] text-white px-4 py-2 rounded">Submit Manual Leave</button>
                         </form>
                     </div>
                 )}
@@ -1290,7 +1458,7 @@ export default function HRManagerDashboard() {
                             <h3 className="text-xl font-semibold text-slate-200">User Management</h3>
                             <button
                                 onClick={() => setShowAddUserForm(true)}
-                                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out"
+                                className="bg-[#411e75] hover:bg-[#5a2aa8] text-white px-4 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out"
                             >
                                 Add New User
                             </button>
@@ -1317,7 +1485,7 @@ export default function HRManagerDashboard() {
                                     placeholder="Search by name, email, or employee number..."
                                     value={userSearchQuery}
                                     onChange={(e) => setUserSearchQuery(e.target.value)}
-                                    className="w-full pl-10 pr-4 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                    className="w-full pl-10 pr-4 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                 />
                                 <svg className="absolute left-3 top-2.5 h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1332,7 +1500,7 @@ export default function HRManagerDashboard() {
                                     <select
                                         value={userRoleFilter}
                                         onChange={(e) => setUserRoleFilter(e.target.value)}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     >
                                         <option value="">All Roles</option>
                                         <option value="Employee">Employee</option>
@@ -1350,7 +1518,7 @@ export default function HRManagerDashboard() {
                                     <select
                                         value={userDepartmentFilter}
                                         onChange={(e) => setUserDepartmentFilter(e.target.value)}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     >
                                         <option value="">All Departments</option>
                                         <option value="Human Resources">Human Resources</option>
@@ -1407,7 +1575,7 @@ export default function HRManagerDashboard() {
                                                 <div className="flex space-x-2">
                                                     <button
                                                         onClick={() => handleEditUser(user)}
-                                                        className="text-blue-400 hover:text-blue-300 text-sm"
+                                                        className="text-[#c6a876] hover:text-[#d4b888] text-sm"
                                                         title="Edit User"
                                                     >
                                                         Edit
@@ -1500,7 +1668,7 @@ export default function HRManagerDashboard() {
                         </div>
                         <div className="mt-6 flex justify-end space-x-3">
                             <button onClick={() => setShowEditBalanceModal(false)} className="text-slate-400">Cancel</button>
-                            <button onClick={saveBalanceChanges} className="bg-blue-600 text-white px-4 py-2 rounded">Save</button>
+                            <button onClick={saveBalanceChanges} className="bg-[#411e75] text-white px-4 py-2 rounded">Save</button>
                         </div>
                     </div>
                 </div>
@@ -1548,7 +1716,7 @@ export default function HRManagerDashboard() {
                                         value={newUser.name}
                                         onChange={handleAddUserChange}
                                         required
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                         placeholder="Enter full name"
                                     />
                                 </div>
@@ -1561,7 +1729,7 @@ export default function HRManagerDashboard() {
                                         value={newUser.email}
                                         onChange={handleAddUserChange}
                                         required
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                         placeholder="Enter email address"
                                     />
                                 </div>
@@ -1574,7 +1742,7 @@ export default function HRManagerDashboard() {
                                         value={newUser.password}
                                         onChange={handleAddUserChange}
                                         required
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                         placeholder="Enter password"
                                     />
                                 </div>
@@ -1586,7 +1754,7 @@ export default function HRManagerDashboard() {
                                         value={newUser.department}
                                         onChange={handleAddUserChange}
                                         required
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     >
                                         <option value="">Select Department</option>
                                         <option value="Human Resources">Human Resources</option>
@@ -1608,7 +1776,7 @@ export default function HRManagerDashboard() {
                                         name="employeeNumber"
                                         value={newUser.employeeNumber}
                                         onChange={handleAddUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                         placeholder="Enter employee number"
                                     />
                                 </div>
@@ -1620,7 +1788,7 @@ export default function HRManagerDashboard() {
                                         name="designation"
                                         value={newUser.designation}
                                         onChange={handleAddUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                         placeholder="Enter designation"
                                     />
                                 </div>
@@ -1631,7 +1799,7 @@ export default function HRManagerDashboard() {
                                         name="gender"
                                         value={newUser.gender}
                                         onChange={handleAddUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     >
                                         <option value="">Select Gender</option>
                                         <option value="male">Male</option>
@@ -1645,7 +1813,7 @@ export default function HRManagerDashboard() {
                                         name="managerId"
                                         value={newUser.managerId}
                                         onChange={handleAddUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     >
                                         <option value="">Select Manager (Optional)</option>
                                         {Object.values(users).filter(u => u.role !== 'Employee').map(manager => (
@@ -1662,7 +1830,7 @@ export default function HRManagerDashboard() {
                                         name="employeeStatus"
                                         value={newUser.employeeStatus}
                                         onChange={handleAddUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     >
                                         <option value="probation">Probation</option>
                                         <option value="permanent">Permanent</option>
@@ -1677,7 +1845,7 @@ export default function HRManagerDashboard() {
                                         name="joinedDate"
                                         value={newUser.joinedDate}
                                         onChange={handleAddUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     />
                                 </div>
 
@@ -1688,7 +1856,7 @@ export default function HRManagerDashboard() {
                                         name="birthday"
                                         value={newUser.birthday}
                                         onChange={handleAddUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     />
                                 </div>
                                 
@@ -1706,7 +1874,7 @@ export default function HRManagerDashboard() {
                                     </button>
                                     <button
                                         type="submit"
-                                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        className="px-4 py-2 bg-[#411e75] hover:bg-[#5a2aa8] text-white rounded-md focus:outline-none focus:ring-2 focus:ring-[#c6a876]"
                                     >
                                         Add User
                                     </button>
@@ -1753,7 +1921,7 @@ export default function HRManagerDashboard() {
                                         value={editingUserData.name}
                                         onChange={handleEditUserChange}
                                         required
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     />
                                 </div>
                                 
@@ -1774,7 +1942,7 @@ export default function HRManagerDashboard() {
                                         value={editingUserData.department}
                                         onChange={handleEditUserChange}
                                         required
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     >
                                         <option value="">Select Department</option>
                                         <option value="Human Resources">Human Resources</option>
@@ -1796,7 +1964,7 @@ export default function HRManagerDashboard() {
                                         name="employeeNumber"
                                         value={editingUserData.employeeNumber}
                                         onChange={handleEditUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     />
                                 </div>
 
@@ -1807,7 +1975,7 @@ export default function HRManagerDashboard() {
                                         name="designation"
                                         value={editingUserData.designation}
                                         onChange={handleEditUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     />
                                 </div>
 
@@ -1817,7 +1985,7 @@ export default function HRManagerDashboard() {
                                         name="gender"
                                         value={editingUserData.gender}
                                         onChange={handleEditUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     >
                                         <option value="">Select Gender</option>
                                         <option value="male">Male</option>
@@ -1831,7 +1999,7 @@ export default function HRManagerDashboard() {
                                         name="managerId"
                                         value={editingUserData.managerId}
                                         onChange={handleEditUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     >
                                         <option value="">Select Manager (Optional)</option>
                                         {Object.values(users).filter(u => u.role !== 'Employee' && (u.uid || u.id) !== editingUserData.uid).map(manager => (
@@ -1848,7 +2016,7 @@ export default function HRManagerDashboard() {
                                         name="employeeStatus"
                                         value={editingUserData.employeeStatus}
                                         onChange={handleEditUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     >
                                         <option value="probation">Probation</option>
                                         <option value="permanent">Permanent</option>
@@ -1863,7 +2031,7 @@ export default function HRManagerDashboard() {
                                         name="joinedDate"
                                         value={editingUserData.joinedDate}
                                         onChange={handleEditUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     />
                                 </div>
 
@@ -1874,7 +2042,7 @@ export default function HRManagerDashboard() {
                                         name="birthday"
                                         value={editingUserData.birthday}
                                         onChange={handleEditUserChange}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-200 bg-card"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
                                     />
                                 </div>
                                 
@@ -1892,7 +2060,7 @@ export default function HRManagerDashboard() {
                                     </button>
                                     <button
                                         type="submit"
-                                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        className="px-4 py-2 bg-[#411e75] hover:bg-[#5a2aa8] text-white rounded-md focus:outline-none focus:ring-2 focus:ring-[#c6a876]"
                                     >
                                         Save Changes
                                     </button>

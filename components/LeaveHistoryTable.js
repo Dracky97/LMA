@@ -39,7 +39,7 @@ export default function LeaveHistoryTable({ requests, users = {}, isAdminView = 
                 </thead>
                 <tbody className="bg-card divide-y divide-gray-700">
                     {requests.map(req => (
-                        <tr key={req.id}>
+                        <tr key={req.id} className="hover:bg-white/5 transition-colors">
                             {isAdminView && <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-200">{users[req.userId]?.name || req.userName || 'Unknown User'}</td>}
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{req.type}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatDate(req.startDate)} - {formatDate(req.endDate)}</td>

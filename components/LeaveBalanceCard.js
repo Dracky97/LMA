@@ -120,7 +120,7 @@ export default function LeaveBalanceCard({ balances, gender, userData }) {
         });
 
     return (
-        <div className="bg-card p-6 rounded-lg shadow-sm">
+        <div className="bg-card p-6 rounded-lg shadow-sm border border-white/5">
             <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-semibold text-slate-200">My Leave Balance</h2>
             </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { app } from '../../lib/firebase-client';
 import ManagerRequestsTable from '../ManagerRequestsTable';
 import LeaveHistoryTable from '../LeaveHistoryTable';
@@ -44,66 +44,97 @@ export default function DepartmentManagerDashboard() {
         };
     }, [userData?.uid]);
 
+    const sendNotification = async (recipientId, type, title, message) => {
+        try {
+            await addDoc(collection(db, 'notifications'), {
+                recipientId,
+                type,
+                title,
+                message,
+                read: false,
+                createdAt: serverTimestamp(),
+            });
+        } catch (e) {
+            console.warn('Could not send notification:', e.message);
+        }
+    };
+
     const handleApproval = async (requestId, newStatus, rejectionReason = '') => {
         try {
-            // Clear any previous messages
             setMessage(null);
 
             const requestRef = doc(db, "leaveRequests", requestId);
             const requestDoc = await getDoc(requestRef);
             const request = requestDoc.data();
 
-            if (!request) {
-                throw new Error('Request not found');
-            }
+            if (!request) throw new Error('Request not found');
 
-            // Unpaid leave always requires HR approval, regardless of balance status
             const isUnpaidLeave = request.type === 'Unpaid Leave';
 
             if (newStatus === 'Approved') {
                 if (isUnpaidLeave) {
-                    // Unpaid leave always escalates to HR for final approval
                     await updateDoc(requestRef, {
                         status: 'Pending HR Approval',
                         approvedBy: userData.name,
                         managerApprovalDate: new Date().toISOString(),
                         rejectionReason: ''
                     });
+                    await sendNotification(
+                        request.userId,
+                        'leave_escalated',
+                        'Leave Sent to HR',
+                        `Your ${request.type} request has been forwarded to HR for final approval.`
+                    );
                     setMessage({ type: 'success', text: 'Unpaid leave request escalated to HR for final approval.' });
                 } else {
-                    // Check if this approval would result in negative balance for paid leave types
                     const wouldGoNegative = await checkIfRequestWouldGoNegative(request);
 
                     if (wouldGoNegative) {
-                        // Request would go negative - escalate to HR for approval
                         await updateDoc(requestRef, {
                             status: 'Pending HR Approval',
                             approvedBy: userData.name,
                             managerApprovalDate: new Date().toISOString(),
                             rejectionReason: ''
                         });
+                        await sendNotification(
+                            request.userId,
+                            'leave_escalated',
+                            'Leave Sent to HR',
+                            `Your ${request.type} request has been forwarded to HR for final approval (insufficient balance).`
+                        );
                         setMessage({ type: 'success', text: 'Request escalated to HR for final approval due to insufficient leave balance.' });
                     } else {
-                        // Regular approval - deduct balance immediately
                         await updateDoc(requestRef, {
                             status: 'Approved',
                             approvedBy: userData.name,
                             approvalDate: new Date().toISOString(),
                             rejectionReason: ''
                         });
-
                         await deductLeaveBalance(request);
+                        await sendNotification(
+                            request.userId,
+                            'leave_approved',
+                            'Leave Request Approved',
+                            `Your ${request.type} request has been approved by your manager.`
+                        );
                         setMessage({ type: 'success', text: 'Leave request approved successfully.' });
                     }
                 }
             } else {
-                // Rejection or other status changes
                 await updateDoc(requestRef, {
                     status: newStatus,
                     approvedBy: userData.name,
                     rejectionReason: newStatus === 'Rejected' ? (rejectionReason?.trim() || '') : '',
                     rejectionDate: newStatus === 'Rejected' ? new Date().toISOString() : null
                 });
+                if (newStatus === 'Rejected') {
+                    await sendNotification(
+                        request.userId,
+                        'leave_rejected',
+                        'Leave Request Rejected',
+                        `Your ${request.type} request was rejected.${rejectionReason ? ` Reason: ${rejectionReason}` : ''}`
+                    );
+                }
                 setMessage({ type: 'success', text: `Leave request ${newStatus.toLowerCase()} successfully.` });
             }
         } catch (error) {

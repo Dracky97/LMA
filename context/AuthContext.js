@@ -167,6 +167,20 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
+    useEffect(() => {
+        const interval = setInterval(() => {
+            if (!user) return;
+            const loginTime = localStorage.getItem('loginTime');
+            if (!loginTime) return;
+            const thirtyMinutesInMs = 30 * 60 * 1000;
+            if (new Date().getTime() - parseInt(loginTime) > thirtyMinutesInMs) {
+                signOut(auth);
+                localStorage.removeItem('loginTime');
+            }
+        }, 60 * 1000);
+        return () => clearInterval(interval);
+    }, [user]);
+
     const login = async (email, password) => {
         try {
             const userCredential = await signInWithEmailAndPassword(auth, email, password);

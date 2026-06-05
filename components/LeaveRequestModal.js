@@ -505,7 +505,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
                             <select
                                 value={type}
                                 onChange={(e) => handleTypeChange(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
+                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-[#411e75] focus:border-[#411e75] bg-card text-slate-200"
                             >
                                 {filteredLeaveTypes.map((leaveType, index) => (
                                     <option key={index} value={leaveType.value}>{leaveType.label}</option>
@@ -607,7 +607,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                         type="date"
                                         value={startDate}
                                         onChange={(e) => setStartDate(e.target.value)}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-[#411e75] focus:border-[#411e75] bg-card text-slate-200"
                                         required
                                     />
                                 </div>
@@ -617,7 +617,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                         type="date"
                                         value={endDate}
                                         onChange={(e) => setEndDate(e.target.value)}
-                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-[#411e75] focus:border-[#411e75] bg-card text-slate-200"
                                         required
                                     />
                                 </div>
@@ -943,7 +943,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
                                     type="text"
                                     value={substituteFor}
                                     onChange={(e) => setSubstituteFor(e.target.value)}
-                                    className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
+                                    className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-[#411e75] focus:border-[#411e75] bg-card text-slate-200"
                                     placeholder="Please specify the date you are substituting for"
                                     required
                                 />
@@ -956,7 +956,7 @@ export default function LeaveRequestModal({ userData, onClose }) {
                             <textarea
                                 value={reason}
                                 onChange={(e) => setReason(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-card text-slate-200"
+                                className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-[#411e75] focus:border-[#411e75] bg-card text-slate-200"
                                 rows="3"
                                 placeholder={type === 'Sick Leave' && medicalDocumentRequired ? "Please provide detailed reason for sick leave" : "Enter reason for leave (optional)"}
                             ></textarea>
@@ -984,13 +984,13 @@ export default function LeaveRequestModal({ userData, onClose }) {
                             <button
                                 type="button"
                                 onClick={onClose}
-                                className="px-4 py-2 text-sm font-medium text-slate-300 bg-card border border-gray-600 rounded-md hover:bg-muted focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                                className="px-4 py-2 text-sm font-medium text-slate-300 bg-card border border-gray-600 rounded-md hover:bg-muted focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#411e75]"
                             >
                                 Cancel
                             </button>
                             <button
                                 type="submit"
-                                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                                className="px-4 py-2 text-sm font-medium text-white bg-[#411e75] border border-transparent rounded-md hover:bg-[#5a2aa8] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#c6a876]"
                             >
                                 Submit Request
                             </button>

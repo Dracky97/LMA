@@ -2,8 +2,10 @@
 
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onRequest } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const nodemailer = require("nodemailer");
+const express = require("express");
 
 // Initialize Firebase Admin SDK
 admin.initializeApp();
@@ -643,3 +645,167 @@ exports.onUserCreated = onDocumentCreated({
         console.error("[onUserCreated] Failed to set leave balances for user " + userId + ": " + error.message);
     }
 });
+
+// -----------------------------------------------------------
+// HTTP API — Express app served by onRequest
+// Routes /api/create-user and /api/delete-user
+// Mirrors the Next.js pages/api routes for use under Firebase Hosting rewrites
+// -----------------------------------------------------------
+
+const LEAVE_API = {
+    SICK_LEAVE_STANDARD: 7,
+    CASUAL_LEAVE_STANDARD: 7,
+    ANNUAL_LEAVE_STANDARD: 14,
+    CASUAL_LEAVE_ACCRUAL_RATE: 0.5,
+    ANNUAL_LEAVE_TIERS: [14, 10, 7, 4],
+    SHORT_LEAVE_MONTHLY_LIMIT: 3,
+};
+
+function apiParseDate(val) {
+    if (!val) return null;
+    if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+    const str = String(val);
+    if (str.match(/^\d{4}-\d{2}-\d{2}$/)) return new Date(str + "T12:00:00");
+    return new Date(val);
+}
+
+function apiCalcMonths(joinDate, refDate) {
+    const join = apiParseDate(joinDate);
+    const ref = apiParseDate(refDate);
+    if (!join || !ref) return 0;
+    let months = (ref.getFullYear() - join.getFullYear()) * 12 + (ref.getMonth() - join.getMonth());
+    if (ref.getDate() < join.getDate()) months--;
+    return Math.max(0, months);
+}
+
+function apiCalcEntitlements(joinDate, currentYear) {
+    const join = apiParseDate(joinDate);
+    if (!join || isNaN(join.getTime())) {
+        return { annualLeave: 0, sickLeave: LEAVE_API.SICK_LEAVE_STANDARD, casualLeave: 0, condition: "A" };
+    }
+    const joinYear = join.getFullYear();
+    const yearEnd = new Date(currentYear, 11, 31);
+    let condition, annualLeave, sickLeave, casualLeave;
+    if (joinYear === currentYear) {
+        condition = "A";
+        const months = apiCalcMonths(joinDate, yearEnd);
+        annualLeave = 0;
+        sickLeave = LEAVE_API.SICK_LEAVE_STANDARD;
+        casualLeave = parseFloat((months * LEAVE_API.CASUAL_LEAVE_ACCRUAL_RATE).toFixed(2));
+    } else if (joinYear === currentYear - 1) {
+        condition = "B";
+        annualLeave = LEAVE_API.ANNUAL_LEAVE_TIERS[Math.floor(join.getMonth() / 3)] || 0;
+        sickLeave = LEAVE_API.SICK_LEAVE_STANDARD;
+        casualLeave = LEAVE_API.CASUAL_LEAVE_STANDARD;
+    } else {
+        condition = "C";
+        annualLeave = LEAVE_API.ANNUAL_LEAVE_STANDARD;
+        sickLeave = LEAVE_API.SICK_LEAVE_STANDARD;
+        casualLeave = LEAVE_API.CASUAL_LEAVE_STANDARD;
+    }
+    return { annualLeave, sickLeave, casualLeave, condition };
+}
+
+const apiApp = express();
+apiApp.use(express.json());
+
+apiApp.post("/api/create-user", async (req, res) => {
+    const { name, email, password, department, managerId, employeeNumber, gender, designation, birthday, employeeStatus, joinedDate, role } = req.body;
+
+    if (!name || !email || !password) {
+        return res.status(400).json({ error: "name, email, and password are required" });
+    }
+
+    try {
+        const userRecord = await admin.auth().createUser({ email, password, displayName: name });
+
+        const currentDate = new Date();
+        const evalBase = joinedDate ? new Date(joinedDate) : currentDate;
+        const evalDate = new Date(evalBase);
+        evalDate.setMonth(evalDate.getMonth() + 3);
+
+        const effectiveJoinDate = joinedDate || currentDate.toISOString();
+        let entitlements;
+        try {
+            entitlements = apiCalcEntitlements(effectiveJoinDate, currentDate.getFullYear());
+        } catch (_) {
+            entitlements = { annualLeave: 0, sickLeave: LEAVE_API.SICK_LEAVE_STANDARD, casualLeave: 0, condition: "A" };
+        }
+
+        const leaveBalance = {
+            annualLeave: entitlements.annualLeave,
+            sickLeave: entitlements.sickLeave,
+            casualLeave: entitlements.casualLeave,
+            shortLeave: LEAVE_API.SHORT_LEAVE_MONTHLY_LIMIT,
+        };
+        const leaveAllocations = {
+            annualLeave: entitlements.annualLeave,
+            sickLeave: entitlements.sickLeave,
+            casualLeave: entitlements.casualLeave,
+        };
+
+        const assignedRole = role || "Employee";
+        const managerPrefixes = ["Admin", "Manager HR", "HR Manager", "CEO", "CMO", "CFO", "COO", "Registrar", "Head of Academic", "Head - Student Support", "Manager IT", "Finance Manager", "Manager - Marketing & Student Enrolment", "Manager - Digital Marketing", "Sales Manager", "Academic - Senior Lecturer"];
+        const isManagerRole = managerPrefixes.some((r) => assignedRole === r || assignedRole.startsWith("Manager") || assignedRole.startsWith("Head"));
+
+        await admin.firestore().collection("users").doc(userRecord.uid).set({
+            name, email,
+            role: assignedRole,
+            isManager: isManagerRole,
+            department: department || null,
+            managerId: managerId || null,
+            employeeNumber: employeeNumber || null,
+            gender: gender || null,
+            designation: designation || null,
+            employeeStatus: employeeStatus || "probation",
+            joinedDate: joinedDate || currentDate.toISOString(),
+            nextEvaluationDate: evalDate.toISOString(),
+            personalDetails: { phone: "", address: "", dob: birthday || "" },
+            education: [],
+            qualifications: [],
+            socialMedia: { linkedin: "", twitter: "" },
+            leaveBalance,
+            leaveAllocations,
+            leaveCondition: entitlements.condition || "A",
+            leaveConditionSetAt: currentDate.toISOString(),
+            leaveConditionSetBy: "Automated System (Condition " + (entitlements.condition || "A") + ")",
+            createdAt: currentDate,
+        });
+
+        return res.status(200).json({ success: true, uid: userRecord.uid });
+    } catch (error) {
+        console.error("[create-user] Error:", error);
+        return res.status(500).json({ error: error.message });
+    }
+});
+
+apiApp.delete("/api/delete-user", async (req, res) => {
+    const { userId: targetUserId } = req.body;
+
+    if (!targetUserId || typeof targetUserId !== "string") {
+        return res.status(400).json({ error: "userId is required" });
+    }
+
+    try {
+        await admin.auth().deleteUser(targetUserId);
+        await admin.firestore().collection("users").doc(targetUserId).delete();
+        return res.status(200).json({ success: true, message: "User deleted from Auth and Firestore" });
+    } catch (error) {
+        console.error("[delete-user] Error:", error);
+        if (error.code === "auth/user-not-found") {
+            try {
+                await admin.firestore().collection("users").doc(targetUserId).delete();
+                return res.status(200).json({ success: true, message: "User not found in Auth, deleted from Firestore" });
+            } catch (fsError) {
+                return res.status(500).json({ error: "Failed to delete from Firestore: " + fsError.message });
+            }
+        }
+        return res.status(500).json({ error: "Failed to delete user: " + error.message });
+    }
+});
+
+apiApp.get("/api/hello", (req, res) => {
+    res.status(200).json({ message: "Hello from Firebase Functions!" });
+});
+
+exports.api = onRequest({ region: "asia-southeast1" }, apiApp);

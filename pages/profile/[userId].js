@@ -7,14 +7,6 @@ import { app } from '../../lib/firebase-client';
 
 const db = getFirestore(app);
 
-export function getStaticPaths() {
-    return { paths: [], fallback: false };
-}
-
-export function getStaticProps() {
-    return { props: {} };
-}
-
 export default function ProfilePage() {
     const router = useRouter();
     const { userId } = router.query;

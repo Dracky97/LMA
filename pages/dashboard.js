@@ -35,6 +35,7 @@ export default function LeaveDashboardPage() {
             case 'CMO':
             case 'CFO':
             case 'COO':
+            case 'Registrar':
             case 'Head of Academic':
             case 'Academic - Senior Lecturer':
             case 'Head - Student Support': // <-- NEW ROLE ADDED

@@ -1574,6 +1574,13 @@ export default function HRManagerDashboard() {
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <div className="flex space-x-2">
                                                     <button
+                                                        onClick={() => handleProfileClick(user.uid || user.id)}
+                                                        className="text-blue-400 hover:text-blue-300 text-sm"
+                                                        title={`View ${user.name || 'user'}'s profile`}
+                                                    >
+                                                        View Profile
+                                                    </button>
+                                                    <button
                                                         onClick={() => handleEditUser(user)}
                                                         className="text-[#c6a876] hover:text-[#d4b888] text-sm"
                                                         title="Edit User"
@@ -1593,7 +1600,13 @@ export default function HRManagerDashboard() {
                                                 {user.employeeNumber || '-'}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-200">
-                                                {user.name}
+                                                <button
+                                                    onClick={() => handleProfileClick(user.uid || user.id)}
+                                                    className="hover:text-blue-300 hover:underline text-left"
+                                                    title={`View ${user.name || 'user'}'s profile`}
+                                                >
+                                                    {user.name}
+                                                </button>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
                                                 {user.email}

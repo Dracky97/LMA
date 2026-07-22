@@ -70,6 +70,7 @@ export default function DepartmentManagerDashboard() {
             if (!request) throw new Error('Request not found');
 
             const isUnpaidLeave = request.type === 'Unpaid Leave';
+            const isLeaveInLieu = request.type === 'Leave in-lieu';
 
             if (newStatus === 'Approved') {
                 if (isUnpaidLeave) {
@@ -86,6 +87,23 @@ export default function DepartmentManagerDashboard() {
                         `Your ${request.type} request has been forwarded to HR for final approval.`
                     );
                     setMessage({ type: 'success', text: 'Unpaid leave request escalated to HR for final approval.' });
+                } else if (isLeaveInLieu) {
+                    // Leave in-lieu is accrued rather than allocated, so manager
+                    // approval is final and must not be escalated for a zero balance.
+                    await updateDoc(requestRef, {
+                        status: 'Approved',
+                        approvedBy: userData.name,
+                        approvalDate: new Date().toISOString(),
+                        rejectionReason: ''
+                    });
+                    await deductLeaveBalance(request);
+                    await sendNotification(
+                        request.userId,
+                        'leave_approved',
+                        'Leave Request Approved',
+                        'Your Leave in-lieu request has been approved by your manager.'
+                    );
+                    setMessage({ type: 'success', text: 'Leave in-lieu request approved successfully.' });
                 } else {
                     const wouldGoNegative = await checkIfRequestWouldGoNegative(request);
 
@@ -234,7 +252,10 @@ export default function DepartmentManagerDashboard() {
                     // Special initialization for Short Leave - start with monthly limit
                     updatedLeaveBalance[leaveType] = leaveType === 'shortLeave' ? LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT : 0;
                 }
-                updatedLeaveBalance[leaveType] = updatedLeaveBalance[leaveType] - duration;
+                // Leave in-lieu is an accrual type: approval earns units.
+                updatedLeaveBalance[leaveType] = leaveType === 'leave in-lieu'
+                    ? updatedLeaveBalance[leaveType] + duration
+                    : updatedLeaveBalance[leaveType] - duration;
             }
 
             // Check if any leave balance is going negative and update noPay status

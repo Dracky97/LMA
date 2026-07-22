@@ -9,6 +9,7 @@ import {
     doc,
     query,
     orderBy,
+    where,
 } from 'firebase/firestore';
 import { app } from '../lib/firebase-client';
 import { useAuth } from '../context/AuthContext';
@@ -63,13 +64,17 @@ function parseDate(dateStr) {
 export default function CalendarView() {
     const { userData } = useAuth();
     const today = new Date();
+    const isAdminOrHR = userData?.role === 'Admin' || userData?.role === 'Manager HR';
+    // Only managers, HR, and admins may see the Team Leave view
+    const canViewTeamLeave = isAdminOrHR || userData?.isManager === true;
 
     const [currentYear, setCurrentYear] = useState(today.getFullYear());
     const [currentMonth, setCurrentMonth] = useState(today.getMonth());
     const [holidays, setHolidays] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedDay, setSelectedDay] = useState(null); // { year, month, day }
-    const [viewMode, setViewMode] = useState('month'); // 'month' | 'list'
+    // Managers come to the calendar primarily to see team availability.
+    const [viewMode, setViewMode] = useState(canViewTeamLeave ? 'team' : 'month'); // 'month' | 'list' | 'team'
     const [listFilter, setListFilter] = useState('all');
 
     // Add/Edit modal state
@@ -86,20 +91,29 @@ export default function CalendarView() {
     const [saving, setSaving] = useState(false);
     const [deleteConfirm, setDeleteConfirm] = useState(null);
 
-    const isAdminOrHR = userData?.role === 'Admin' || userData?.role === 'Manager HR';
-    // Only managers, HR, and admins may see the Team Leave view
-    const canViewTeamLeave = isAdminOrHR || userData?.isManager === true;
-
     // Team leave state
     const [allLeaveRequests, setAllLeaveRequests] = useState([]);
     const [allUsers, setAllUsers] = useState({});
-    const [teamLeaveFilter, setTeamLeaveFilter] = useState('approved'); // 'approved' | 'all'
+    // Include pending requests initially so a newly submitted team request is visible.
+    const [teamLeaveFilter, setTeamLeaveFilter] = useState('all'); // 'approved' | 'all'
 
     // Only fetch team leave data for users who are permitted to see it
     useEffect(() => {
         if (!userData?.uid || !canViewTeamLeave) return;
-        const reqUnsub = onSnapshot(collection(db, 'leaveRequests'), (snap) => {
+        // Firestore security rules are not filters. Managers must query only
+        // requests assigned to them; a collection-wide listener is rejected
+        // when it also matches requests belonging to other managers.
+        const requestsQuery = isAdminOrHR
+            ? collection(db, 'leaveRequests')
+            : query(
+                collection(db, 'leaveRequests'),
+                where('managerId', '==', userData.uid)
+            );
+        const reqUnsub = onSnapshot(requestsQuery, (snap) => {
             setAllLeaveRequests(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        }, (err) => {
+            console.error('Error loading team leave requests:', err);
+            setAllLeaveRequests([]);
         });
         const usrUnsub = onSnapshot(collection(db, 'users'), (snap) => {
             const map = {};
@@ -107,7 +121,7 @@ export default function CalendarView() {
             setAllUsers(map);
         });
         return () => { reqUnsub(); usrUnsub(); };
-    }, [userData?.uid, canViewTeamLeave]);
+    }, [userData?.uid, canViewTeamLeave, isAdminOrHR]);
 
     // Filter requests to the current user's team scope
     const teamRequests = useMemo(() => {
@@ -121,10 +135,10 @@ export default function CalendarView() {
         }
         // Scope: HR/Admin see all; managers see their direct reports only
         if (!isAdminOrHR) {
-            filtered = filtered.filter(r => r.managerId === userData.uid || r.userId === userData.uid);
+            filtered = filtered.filter(r => r.managerId === userData.uid);
         }
         return filtered;
-    }, [allLeaveRequests, allUsers, userData, isAdminOrHR, canViewTeamLeave, teamLeaveFilter]);
+    }, [allLeaveRequests, userData, isAdminOrHR, canViewTeamLeave, teamLeaveFilter]);
 
     // Build a map: dateKey -> [{userId, name, leaveType, status}]
     const teamLeaveMap = useMemo(() => {
@@ -705,6 +719,12 @@ export default function CalendarView() {
                                 );
                             })}
                         </div>
+                    </div>
+                )}
+
+                {teamRequests.length === 0 && (
+                    <div className="mb-4 rounded-lg border border-gray-700 bg-gray-900/40 px-4 py-3 text-sm text-slate-400">
+                        No {teamLeaveFilter === 'approved' ? 'approved ' : ''}leave requests found for your team.
                     </div>
                 )}
 

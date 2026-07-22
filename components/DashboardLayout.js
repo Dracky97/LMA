@@ -18,6 +18,7 @@ export default function DashboardLayout({ children }) {
 
     if (userData?.isManager) {
         navLinks.splice(1, 0, { name: 'Team Requests', href: '/team-requests' });
+        navLinks.splice(2, 0, { name: 'Team Balances', href: '/team-balances' });
     }
 
     return (

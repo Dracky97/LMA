@@ -59,6 +59,7 @@ export default function TeamRequestsPage() {
 
             // Unpaid leave always requires HR approval, regardless of balance status
             const isUnpaidLeave = request.type === 'Unpaid Leave';
+            const isLeaveInLieu = request.type === 'Leave in-lieu';
 
             if (newStatus === 'Approved') {
                 if (isUnpaidLeave) {
@@ -69,6 +70,18 @@ export default function TeamRequestsPage() {
                         rejectionReason: ''
                     });
                     setMessage({ type: 'success', text: 'Unpaid leave request escalated to HR for final approval.' });
+                } else if (isLeaveInLieu) {
+                    // Leave in-lieu is accrued rather than allocated, so manager
+                    // approval is final and must not be escalated for a zero balance.
+                    await updateDoc(requestRef, {
+                        status: 'Approved',
+                        approvedBy: userData.name,
+                        approvalDate: new Date().toISOString(),
+                        rejectionReason: ''
+                    });
+
+                    await deductLeaveBalance(request);
+                    setMessage({ type: 'success', text: 'Leave in-lieu request approved successfully.' });
                 } else {
                     // Check if this approval would result in negative balance
                     const wouldGoNegative = await checkIfRequestWouldGoNegative(request);
@@ -200,7 +213,10 @@ export default function TeamRequestsPage() {
                 if (!updatedLeaveBalance[leaveType]) {
                     updatedLeaveBalance[leaveType] = leaveType === 'shortLeave' ? LEAVE_CONFIG.SHORT_LEAVE_MONTHLY_LIMIT : 0;
                 }
-                updatedLeaveBalance[leaveType] = updatedLeaveBalance[leaveType] - duration;
+                // Leave in-lieu is an accrual type: approval earns units.
+                updatedLeaveBalance[leaveType] = leaveType === 'leave in-lieu'
+                    ? updatedLeaveBalance[leaveType] + duration
+                    : updatedLeaveBalance[leaveType] - duration;
             }
 
             // Check if any leave balance is going negative and update noPay status

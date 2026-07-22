@@ -13,6 +13,85 @@ const getStatusBadge = (status) => {
     return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${color}`}>{status}</span>;
 };
 
+const formatHours = (hours) => {
+    const value = Number(hours);
+    if (!Number.isFinite(value) || value <= 0) return '';
+    return `${Number.isInteger(value) ? value : value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')} hr${value === 1 ? '' : 's'}`;
+};
+
+const toDate = (value) => {
+    if (value?.toDate) return value.toDate();
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const getInclusiveDateCount = (startValue, endValue) => {
+    const start = toDate(startValue);
+    const end = toDate(endValue);
+    if (!start || !end || end < start) return 0;
+
+    const startUtc = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
+    const endUtc = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
+    return Math.floor((endUtc - startUtc) / 86400000) + 1;
+};
+
+const getLeaveDuration = (request) => {
+    if (request.type === 'Short Leave') {
+        const hours = formatHours(request.totalHours);
+        return hours ? `Short Leave (${hours})` : 'Short Leave';
+    }
+
+    const configurations = request.dateConfigurations && typeof request.dateConfigurations === 'object'
+        ? Object.values(request.dateConfigurations)
+        : [];
+
+    if (request.isGranularSelection && configurations.length > 0) {
+        const counts = configurations.reduce((result, configuration) => {
+            const dayType = configuration?.type || 'full';
+            result[dayType] = (result[dayType] || 0) + 1;
+            return result;
+        }, {});
+        // Granular requests only persist dates the employee changed. Any date
+        // without a saved configuration uses the form's Full Day default.
+        const unconfiguredDates = getInclusiveDateCount(request.startDate, request.endDate) - configurations.length;
+        if (unconfiguredDates > 0) counts.full = (counts.full || 0) + unconfiguredDates;
+        const labels = [];
+
+        if (counts.full) labels.push(`Full Day${counts.full > 1 ? ` × ${counts.full}` : ''}`);
+        if (counts.half) labels.push(`Half Day${counts.half > 1 ? ` × ${counts.half}` : ''}`);
+        if (counts.short) {
+            const hours = formatHours(request.totalHours);
+            labels.push(`Short Leave${counts.short > 1 ? ` × ${counts.short}` : ''}${hours ? ` (${hours})` : ''}`);
+        }
+        if (counts.na) labels.push(`Not Applicable${counts.na > 1 ? ` × ${counts.na}` : ''}`);
+
+        if (labels.length > 0) return labels.join(', ');
+    }
+
+    const units = Number(request.leaveUnits);
+    if (Number.isFinite(units)) {
+        if (units === 0.5) return 'Half Day';
+        if (units === 1) return 'Full Day';
+        if (units > 1) return `${units} Days`;
+    }
+
+    const hours = Number(request.totalHours);
+    if (request.isPartialDay && Number.isFinite(hours) && hours > 0) {
+        if (hours <= 2) return `Short Leave (${formatHours(hours)})`;
+        if (hours <= 4.5) return 'Half Day';
+        return 'Full Day';
+    }
+
+    const totalDays = Number(request.totalDays);
+    if (Number.isFinite(totalDays) && totalDays > 0) {
+        if (totalDays === 0.5) return 'Half Day';
+        if (totalDays === 1) return 'Full Day';
+        return `${totalDays} Days`;
+    }
+
+    return 'Not specified';
+};
+
 export default function LeaveHistoryTable({ requests, users = {}, isAdminView = false, canCancel = false, onCancel = () => {} }) {
     if (!requests || requests.length === 0) {
         return <p className="text-center text-slate-500 py-8">No leave requests found.</p>;
@@ -30,6 +109,7 @@ export default function LeaveHistoryTable({ requests, users = {}, isAdminView = 
                     <tr>
                         {isAdminView && <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Employee</th>}
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Type</th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Duration</th>
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Dates</th>
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Reason</th>
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Status</th>
@@ -42,6 +122,7 @@ export default function LeaveHistoryTable({ requests, users = {}, isAdminView = 
                         <tr key={req.id} className="hover:bg-white/5 transition-colors">
                             {isAdminView && <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-200">{users[req.userId]?.name || req.userName || 'Unknown User'}</td>}
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{req.type}</td>
+                            <td className="px-6 py-4 text-sm text-slate-300 min-w-36">{getLeaveDuration(req)}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{formatDate(req.startDate)} - {formatDate(req.endDate)}</td>
                             <td className="px-6 py-4 text-sm text-slate-400 max-w-xs truncate" title={req.reason}>{req.reason}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{getStatusBadge(req.status)}</td>

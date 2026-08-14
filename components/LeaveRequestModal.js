@@ -39,11 +39,11 @@ export default function LeaveRequestModal({ userData, onClose }) {
         { label: 'Full Day (08:30 AM - 05:00 PM)', startTime: '08:30', endTime: '17:00', duration: 540 }
     ];
 
-    // Filter leave types based on user's gender using shared configuration
-    const filteredLeaveTypes = getFilteredLeaveTypes(userData.gender);
-
     // Get user's leave balances
     const leaveBalances = userData.leaveBalance || {};
+
+    // Filter leave types based on user's gender and available balance using shared configuration
+    const filteredLeaveTypes = getFilteredLeaveTypes(userData.gender, leaveBalances);
 
     // Helper function to check if user has sufficient leave balance
     const hasSufficientBalance = (leaveType, requiredDays) => {
@@ -109,6 +109,16 @@ export default function LeaveRequestModal({ userData, onClose }) {
             };
         }
     };
+
+    // If the default/current type isn't selectable for this user (e.g. no balance
+    // for it, or gender-restricted), fall back to the first type they can apply for.
+    useEffect(() => {
+        if (filteredLeaveTypes.length === 0) return;
+        if (!filteredLeaveTypes.some(leaveType => leaveType.value === type)) {
+            setType(filteredLeaveTypes[0].value);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [filteredLeaveTypes.map(t => t.value).join(','), type]);
 
     // Handle leave type change with balance checking
     const handleTypeChange = (newType) => {
@@ -351,6 +361,14 @@ export default function LeaveRequestModal({ userData, onClose }) {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+
+        // Guard against submitting a leave type the user isn't entitled to
+        // (e.g. zero balance, or gender-restricted), even if the state was
+        // set before the balance/gender filtering kicked in.
+        if (!filteredLeaveTypes.some(leaveType => leaveType.value === type)) {
+            setError(`You are not eligible to apply for ${type}.`);
+            return;
+        }
 
         // Basic validation
         if (!startDate || !endDate) {

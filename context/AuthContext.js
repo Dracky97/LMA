@@ -56,6 +56,16 @@ export const AuthProvider = ({ children }) => {
                 unsubSnapshot = onSnapshot(userDocRef, (docSnap) => {
                     if (docSnap.exists()) {
                         const newData = { uid: currentUser.uid, ...docSnap.data() };
+
+                        if (newData.disabled) {
+                            localStorage.setItem('accountDisabled', '1');
+                            signOut(auth);
+                            localStorage.removeItem('loginTime');
+                            setUserData(null);
+                            setLoading(false);
+                            return;
+                        }
+
                         setUserData(prevData => {
                             // Only update if data has actually changed
                             if (JSON.stringify(prevData) !== JSON.stringify(newData)) {
@@ -189,6 +199,9 @@ export const AuthProvider = ({ children }) => {
             return userCredential;
         } catch (error) {
             console.error("Error logging in:", error);
+            if (error.code === 'auth/user-disabled') {
+                throw new Error('This account has been disabled. Please contact HR or your administrator.');
+            }
             throw new Error(`Login failed: ${error.message}`);
         }
     };

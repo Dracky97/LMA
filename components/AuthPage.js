@@ -26,6 +26,13 @@ export default function AuthPage({ title }) {
   const [resetLoading, setResetLoading] = useState(false);
   const { login, resetPassword } = useAuth();
 
+  React.useEffect(() => {
+    if (typeof window !== 'undefined' && localStorage.getItem('accountDisabled')) {
+      setError('This account has been disabled. Please contact HR or your administrator.');
+      localStorage.removeItem('accountDisabled');
+    }
+  }, []);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');

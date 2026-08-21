@@ -73,6 +73,14 @@ export default function HRManagerDashboard() {
     const [showEditUserModal, setShowEditUserModal] = useState(false);
     const [editingUserData, setEditingUserData] = useState(null);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
+    const [showDisableConfirm, setShowDisableConfirm] = useState(null);
+    const [isTogglingDisable, setIsTogglingDisable] = useState(false);
+
+    // History Filter State
+    const [historyNameFilter, setHistoryNameFilter] = useState('');
+    const [historyDepartmentFilter, setHistoryDepartmentFilter] = useState('');
+    const [historyMonthFilter, setHistoryMonthFilter] = useState('');
+    const [filteredHistoryRequests, setFilteredHistoryRequests] = useState([]);
 
     // --- Data Fetching ---
     useEffect(() => {
@@ -144,6 +152,38 @@ export default function HRManagerDashboard() {
 
         setFilteredUsersList(usersList);
     }, [users, userSearchQuery, userRoleFilter, userDepartmentFilter]);
+
+    // Filter leave history for the History tab / CSV export
+    useEffect(() => {
+        let historyList = allRequests;
+
+        if (historyNameFilter.trim()) {
+            const query = historyNameFilter.trim().toLowerCase();
+            historyList = historyList.filter(req => {
+                const name = users[req.userId]?.name || req.userName || '';
+                return name.toLowerCase().includes(query);
+            });
+        }
+
+        if (historyDepartmentFilter) {
+            historyList = historyList.filter(req => users[req.userId]?.department === historyDepartmentFilter);
+        }
+
+        if (historyMonthFilter) {
+            historyList = historyList.filter(req => {
+                if (!req.startDate?.toDate) return false;
+                const startDate = req.startDate.toDate();
+                const requestMonth = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`;
+                return requestMonth === historyMonthFilter;
+            });
+        }
+
+        // Most recent leave request first, falling back to start date when appliedOn is missing
+        const getSortTime = (req) => (req.appliedOn?.toDate?.() || req.startDate?.toDate?.() || new Date(0)).getTime();
+        historyList = [...historyList].sort((a, b) => getSortTime(b) - getSortTime(a));
+
+        setFilteredHistoryRequests(historyList);
+    }, [allRequests, users, historyNameFilter, historyDepartmentFilter, historyMonthFilter]);
 
     // Filter and sort users for balances tab
     useEffect(() => {
@@ -493,6 +533,63 @@ export default function HRManagerDashboard() {
         } finally {
             setIsGeneratingReport(false);
         }
+    };
+
+    const downloadHistoryAsCSV = () => {
+        if (!filteredHistoryRequests.length) {
+            setMessage({ type: 'error', text: 'No leave history found for the selected filters.' });
+            return;
+        }
+
+        const escapeCsvField = (value) => {
+            const stringValue = value === null || value === undefined ? '' : String(value);
+            return /[",\n]/.test(stringValue) ? `"${stringValue.replace(/"/g, '""')}"` : stringValue;
+        };
+
+        const formatCsvDate = (timestamp) => {
+            if (!timestamp || !timestamp.toDate) return '';
+            return timestamp.toDate().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        };
+
+        const headers = [
+            'Employee Name', 'Employee Number', 'Department', 'Leave Type', 'Start Date', 'End Date',
+            'Leave Units (Days)', 'Reason', 'Status', 'Applied On', 'Rejection Reason'
+        ];
+
+        const rows = filteredHistoryRequests.map(req => {
+            const user = users[req.userId];
+            return [
+                user?.name || req.userName || 'Unknown User',
+                user?.employeeNumber || '',
+                user?.department || '',
+                req.type || '',
+                formatCsvDate(req.startDate),
+                formatCsvDate(req.endDate),
+                req.leaveUnits ?? '',
+                req.reason || '',
+                req.status || '',
+                formatCsvDate(req.appliedOn),
+                req.rejectionReason || ''
+            ];
+        });
+
+        const csvContent = [headers, ...rows]
+            .map(row => row.map(escapeCsvField).join(','))
+            .join('\n');
+
+        const blob = new Blob(['﻿' + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const dateStamp = new Date().toISOString().slice(0, 10);
+        const nameSuffix = historyNameFilter.trim() ? `_${historyNameFilter.trim().replace(/\s+/g, '-')}` : '';
+        const deptSuffix = historyDepartmentFilter ? `_${historyDepartmentFilter.replace(/\s+/g, '-')}` : '';
+        const monthSuffix = historyMonthFilter ? `_${historyMonthFilter}` : '';
+        link.href = url;
+        link.download = `leave-history${nameSuffix}${deptSuffix}${monthSuffix}_${dateStamp}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
     };
 
     const generateCustomReport = async () => {
@@ -953,6 +1050,36 @@ export default function HRManagerDashboard() {
         }
     };
 
+    const handleToggleDisableUser = async (user, disable) => {
+        setIsTogglingDisable(true);
+        try {
+            const response = await fetch('/api/disable-user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userId: user.uid || user.id,
+                    disable,
+                    actingUserName: userData?.name || null
+                })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result.error || 'Failed to update user status');
+            }
+
+            setSuccess(disable ? 'User account disabled. Their leave history remains available for HR.' : 'User account re-enabled.');
+            setShowDisableConfirm(null);
+            setTimeout(() => setSuccess(''), 3000);
+        } catch (error) {
+            console.error('Error updating user disabled status:', error);
+            setError('Failed to update user status: ' + error.message);
+        } finally {
+            setIsTogglingDisable(false);
+        }
+    };
+
     const pendingFinalHRRequests = allRequests.filter(r => r.status === 'Pending HR Approval' && r.hrManagerApproval !== 'Approved');
 
     return (
@@ -1065,7 +1192,80 @@ export default function HRManagerDashboard() {
                 {/* 3. HISTORY TAB */}
                 {activeTab === 'history' && (
                     <div className="p-6">
-                        <LeaveHistoryTable requests={allRequests} users={users} isAdminView={true} />
+                        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-1">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Filter by Name</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Search by employee name..."
+                                        value={historyNameFilter}
+                                        onChange={(e) => setHistoryNameFilter(e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Filter by Department</label>
+                                    <select
+                                        value={historyDepartmentFilter}
+                                        onChange={(e) => setHistoryDepartmentFilter(e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
+                                    >
+                                        <option value="">All Departments</option>
+                                        <option value="Human Resources">Human Resources</option>
+                                        <option value="Finance">Finance</option>
+                                        <option value="Academic">Academic</option>
+                                        <option value="Marketing">Marketing</option>
+                                        <option value="Administration">Administration</option>
+                                        <option value="IT">IT</option>
+                                        <option value="Operations">Operations</option>
+                                        <option value="Registrar">Registrar</option>
+                                        <option value="Student Support">Student Support</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">Filter by Month</label>
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="month"
+                                            value={historyMonthFilter}
+                                            onChange={(e) => setHistoryMonthFilter(e.target.value)}
+                                            className="w-full px-3 py-2 border border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#411e75] focus:border-[#411e75] text-slate-200 bg-card"
+                                        />
+                                        {historyMonthFilter && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setHistoryMonthFilter('')}
+                                                title="Clear month filter"
+                                                className="px-2 text-slate-400 hover:text-slate-200"
+                                            >
+                                                ✕
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => {
+                                        setHistoryNameFilter('');
+                                        setHistoryDepartmentFilter('');
+                                        setHistoryMonthFilter('');
+                                    }}
+                                    className="bg-card hover:bg-white/10 border border-gray-600 text-slate-300 px-4 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out whitespace-nowrap"
+                                >
+                                    Clear Filters
+                                </button>
+                                <button
+                                    onClick={downloadHistoryAsCSV}
+                                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out whitespace-nowrap"
+                                >
+                                    Export CSV
+                                </button>
+                            </div>
+                        </div>
+                        <p className="text-sm text-slate-500 mb-4">Showing {filteredHistoryRequests.length} of {allRequests.length} leave records</p>
+                        <LeaveHistoryTable requests={filteredHistoryRequests} users={users} isAdminView={true} />
                     </div>
                 )}
 
@@ -1594,6 +1794,25 @@ export default function HRManagerDashboard() {
                                                     >
                                                         Delete
                                                     </button>
+                                                    {user.role !== 'Admin' && (user.uid || user.id) !== userData?.uid && (
+                                                        user.disabled ? (
+                                                            <button
+                                                                onClick={() => setShowDisableConfirm({ user, disable: false })}
+                                                                className="text-green-400 hover:text-green-300 text-sm"
+                                                                title="Enable User"
+                                                            >
+                                                                Enable
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => setShowDisableConfirm({ user, disable: true })}
+                                                                className="text-orange-400 hover:text-orange-300 text-sm"
+                                                                title="Disable User"
+                                                            >
+                                                                Disable
+                                                            </button>
+                                                        )
+                                                    )}
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
@@ -1618,13 +1837,20 @@ export default function HRManagerDashboard() {
                                                 {user.department}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
-                                                <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                                    user.employeeStatus === 'permanent' ? 'bg-green-900/30 text-green-300' :
-                                                    user.employeeStatus === 'probation' ? 'bg-yellow-900/30 text-yellow-300' :
-                                                    'bg-blue-900/30 text-blue-300'
-                                                }`}>
-                                                    {user.employeeStatus || 'probation'}
-                                                </span>
+                                                <div className="flex flex-col space-y-1">
+                                                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                                        user.employeeStatus === 'permanent' ? 'bg-green-900/30 text-green-300' :
+                                                        user.employeeStatus === 'probation' ? 'bg-yellow-900/30 text-yellow-300' :
+                                                        'bg-blue-900/30 text-blue-300'
+                                                    }`}>
+                                                        {user.employeeStatus || 'probation'}
+                                                    </span>
+                                                    {user.disabled && (
+                                                        <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-900/30 text-red-300">
+                                                            Disabled
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
@@ -2104,6 +2330,43 @@ export default function HRManagerDashboard() {
                                 className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
                             >
                                 Delete User
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Disable/Enable Confirmation Dialog */}
+            {showDisableConfirm && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-card rounded-lg shadow-xl w-full max-w-md p-6">
+                        <h3 className="text-lg font-medium text-slate-200 mb-4">
+                            {showDisableConfirm.disable ? 'Confirm Disable' : 'Confirm Enable'}
+                        </h3>
+                        <p className="text-slate-300 mb-6">
+                            {showDisableConfirm.disable ? (
+                                <>Are you sure you want to disable <strong>{showDisableConfirm.user.name}</strong>&apos;s account? They will no longer be able to log in, but their leave history and records will remain available to HR.</>
+                            ) : (
+                                <>Are you sure you want to re-enable <strong>{showDisableConfirm.user.name}</strong>&apos;s account? They will be able to log in again.</>
+                            )}
+                        </p>
+                        <div className="flex justify-end space-x-3">
+                            <button
+                                onClick={() => setShowDisableConfirm(null)}
+                                className="px-4 py-2 border border-gray-600 text-slate-300 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => handleToggleDisableUser(showDisableConfirm.user, showDisableConfirm.disable)}
+                                disabled={isTogglingDisable}
+                                className={`px-4 py-2 text-white rounded-md focus:outline-none focus:ring-2 disabled:opacity-50 ${
+                                    showDisableConfirm.disable
+                                        ? 'bg-orange-600 hover:bg-orange-700 focus:ring-orange-500'
+                                        : 'bg-green-600 hover:bg-green-700 focus:ring-green-500'
+                                }`}
+                            >
+                                {isTogglingDisable ? 'Please wait...' : (showDisableConfirm.disable ? 'Disable User' : 'Enable User')}
                             </button>
                         </div>
                     </div>
